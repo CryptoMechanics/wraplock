@@ -27,21 +27,32 @@ namespace eosio {
             name          bridge_contract;
             name          native_token_contract;
             checksum256   paired_chain_id;
-            name          paired_wraptoken_contract;
+            name          paired_liquid_wraptoken_contract;
+            name          paired_staked_wraptoken_contract;
          } globalrow;
 
-         struct [[eosio::table]] extaccount {
-            asset    balance;
+         struct [[eosio::table]] account {
+            name     owner;
+            asset    liquid_balance;
+            asset    locked_balance;
+            asset    staked_balance;
+            asset    unstaking_balance;
 
-            uint64_t primary_key()const { return balance.symbol.code().raw(); }
+            uint64_t primary_key()const { return owner.value; }
          };
 
 
-         void sub_external_balance( const name& owner, const asset& value );
-         void add_external_balance( const name& owner, const asset& value, const name& ram_payer );
+         void sub_liquid_balance( const name& owner, const asset& value );
+         void add_liquid_balance( const name& owner, const asset& value );
 
-         void sub_reserve(const asset& value );
-         void add_reserve(const asset& value );
+         void sub_locked_balance( const name& owner, const asset& value );
+         void add_locked_balance( const name& owner, const asset& value );
+
+         void sub_staked_balance( const name& owner, const asset& value );
+         void add_staked_balance( const name& owner, const asset& value );
+
+         void sub_unstaking_balance( const name& owner, const asset& value );
+         void add_unstaking_balance( const name& owner, const asset& value );
 
       public:
          using contract::contract;
@@ -77,18 +88,25 @@ namespace eosio {
            name             owner;
            extended_asset   quantity;
            name             beneficiary;
+           bool             staked;
          };
 
 
          [[eosio::action]]
-         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_wraptoken_contract);
+         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract);
 
 
          [[eosio::action]]
-         void lock(const name& owner, const asset& quantity, const name& beneficiary);
+         void lock(const name& owner, const asset& quantity, const name& beneficiary, const bool stake);
 
          [[eosio::action]]
-         void withdraw(const name& caller, const checksum256 action_receipt_digest);
+         void unlock(const name& caller, const checksum256 action_receipt_digest);
+
+         [[eosio::action]]
+         void unstake(const name& caller, const checksum256 action_receipt_digest);
+
+         [[eosio::action]]
+         void withdraw(const name& owner, const asset& quantity);
       
 
          [[eosio::action]]
@@ -108,8 +126,7 @@ namespace eosio {
         [[eosio::on_notify("*::transfer")]] void deposit(name from, name to, asset quantity, string memo);
 
 
-         typedef eosio::multi_index< "extaccounts"_n, extaccount > extaccounts;
-         typedef eosio::multi_index< "reserves"_n, extaccount > reserves;
+         typedef eosio::multi_index< "accounts"_n, account > accountstable;
 
          typedef eosio::multi_index< "proofs"_n, validproof,
             indexed_by<"digest"_n, const_mem_fun<validproof, checksum256, &validproof::by_digest>>> proofstable;
@@ -125,14 +142,15 @@ namespace eosio {
 
          globaltable global_config;
 
+         accountstable _accountstable;
+
         processedtable _processedtable;
-        reserves _reservestable;
 
         token( name receiver, name code, datastream<const char*> ds ) :
         contract(receiver, code, ds),
         global_config(_self, _self.value),
-        _processedtable(_self, _self.value),
-        _reservestable(_self, _self.value)
+        _accountstable(_self, _self.value),
+        _processedtable(_self, _self.value)
         {
         
         }
