@@ -50,22 +50,22 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
 }
 
 //locks a token amount in the reserve for an interchain transfer
-void token::lock(const name& owner,  const extended_asset& quantity, const name& beneficiary){
+void token::lock(const name& owner,  const asset& quantity, const name& beneficiary){
 
   check(global_config.exists(), "contract must be initialized first");
 
   require_auth(owner);
 
-  check(quantity.contract != _self, "cannot lock wrapped tokens");
-
-  check(quantity.quantity.amount > 0, "must lock positive quantity");
+  check(quantity.amount > 0, "must lock positive quantity");
 
   sub_external_balance( owner, quantity );
   add_reserve( quantity );
 
+  auto global = global_config.get();
+
   token::xfer x = {
     .owner = owner,
-    .quantity = quantity,
+    .quantity = extended_asset(quantity, global.native_token_contract),
     .beneficiary = beneficiary
   };
 
@@ -87,23 +87,23 @@ void token::emitxfer(const token::xfer& xfer){
 
 }
 
-void token::sub_reserve( const extended_asset& value ){
+void token::sub_reserve( const asset& value ){
 
    //reserves res_acnts( get_self(), _self.value );
 
-   const auto& res = _reservestable.get( value.quantity.symbol.code().raw(), "no balance object found" );
-   check( res.balance.quantity.amount >= value.quantity.amount, "overdrawn balance" );
+   const auto& res = _reservestable.get( value.symbol.code().raw(), "no balance object found" );
+   check( res.balance.amount >= value.amount, "overdrawn balance" );
 
    _reservestable.modify( res, _self, [&]( auto& a ) {
          a.balance -= value;
       });
 }
 
-void token::add_reserve(const extended_asset& value){
+void token::add_reserve(const asset& value){
 
    //reserves res_acnts( get_self(), _self.value );
 
-   auto res = _reservestable.find( value.quantity.symbol.code().raw() );
+   auto res = _reservestable.find( value.symbol.code().raw() );
    if( res == _reservestable.end() ) {
       _reservestable.emplace( _self, [&]( auto& a ){
         a.balance = value;
@@ -116,28 +116,28 @@ void token::add_reserve(const extended_asset& value){
 
 }
 
-void token::sub_external_balance( const name& owner, const extended_asset& value ){
+void token::sub_external_balance( const name& owner, const asset& value ){
 
    extaccounts from_acnts( get_self(), owner.value );
 
-   const auto& from = from_acnts.get( value.quantity.symbol.code().raw(), "no balance object found" );
-   check( from.balance.quantity.amount >= value.quantity.amount, "overdrawn balance" );
+   const auto& from = from_acnts.get( value.symbol.code().raw(), "no balance object found" );
+   check( from.balance.amount >= value.amount, "overdrawn balance" );
 
    from_acnts.modify( from, owner, [&]( auto& a ) {
          a.balance -= value;
       });
 }
 
-void token::add_external_balance( const name& owner, const extended_asset& value, const name& ram_payer ){
+void token::add_external_balance( const name& owner, const asset& value, const name& ram_payer ){
 
    extaccounts to_acnts( get_self(), owner.value );
-   auto to = to_acnts.find( value.quantity.symbol.code().raw() );
+   auto to = to_acnts.find( value.symbol.code().raw() );
    if( to == to_acnts.end() ) {
       to_acnts.emplace( ram_payer, [&]( auto& a ){
         a.balance = value;
       });
    } else {
-      if (value.quantity.amount > 0) { // prevent modification in repreated opens
+      if (value.amount > 0) { // prevent modification in repreated opens
           to_acnts.modify( to, same_payer, [&]( auto& a ) {
             a.balance += value;
           });
@@ -155,7 +155,7 @@ void token::open( const name& owner, const symbol& symbol, const name& ram_payer
    check( is_account( owner ), "owner account does not exist" );
 
    auto global = global_config.get();
-   add_external_balance(owner, extended_asset(asset{0, symbol}, global.native_token_contract), ram_payer);
+   add_external_balance(owner, asset{0, symbol}, ram_payer);
 
 }
 
@@ -168,7 +168,7 @@ void token::close( const name& owner, const symbol& symbol )
    extaccounts acnts( get_self(), owner.value );
    auto it = acnts.find( symbol.code().raw() );
    check( it != acnts.end(), "Balance row already deleted or never existed. Action won't have any effect." );
-   check( it->balance.quantity.amount == 0, "Cannot close because the balance is not zero." );
+   check( it->balance.amount == 0, "Cannot close because the balance is not zero." );
    acnts.erase( it );
 
 }
@@ -182,14 +182,12 @@ void token::deposit(name from, name to, asset quantity, string memo)
     auto global = global_config.get();
     check(get_sender() == global.native_token_contract, "transfer not permitted from unauthorised token contract");
 
-    extended_asset xquantity = extended_asset(quantity, global.native_token_contract);
-
     //if incoming transfer
     if (from == "eosio.stake"_n) return ; //ignore unstaking transfers
     else if (to == get_self() && from != get_self()){
       //ignore outbound transfers from this contract, as well as inbound transfers of tokens internal to this contract
       //otherwise, means it's a deposit of external token from user
-      add_external_balance(from, xquantity, from);
+      add_external_balance(from, quantity, from);
 
     }
 
@@ -214,7 +212,7 @@ void token::withdraw(const name& caller, const checksum256 action_receipt_digest
 
     check(proof.action.name == "emitxfer"_n, "must provide proof of token retiring before issuing");
 
-    sub_reserve(redeem_act.quantity);
+    sub_reserve(redeem_act.quantity.quantity);
     
     action act(
       permission_level{_self, "active"_n},

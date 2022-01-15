@@ -31,17 +31,17 @@ namespace eosio {
          } globalrow;
 
          struct [[eosio::table]] extaccount {
-            extended_asset    balance;
+            asset    balance;
 
-            uint64_t primary_key()const { return balance.quantity.symbol.code().raw(); }
+            uint64_t primary_key()const { return balance.symbol.code().raw(); }
          };
 
 
-         void sub_external_balance( const name& owner, const extended_asset& value );
-         void add_external_balance( const name& owner, const extended_asset& value, const name& ram_payer );
+         void sub_external_balance( const name& owner, const asset& value );
+         void add_external_balance( const name& owner, const asset& value, const name& ram_payer );
 
-         void sub_reserve(const extended_asset& value );
-         void add_reserve(const extended_asset& value );
+         void sub_reserve(const asset& value );
+         void add_reserve(const asset& value );
 
       public:
          using contract::contract;
@@ -85,7 +85,7 @@ namespace eosio {
 
 
          [[eosio::action]]
-         void lock(const name& owner,  const extended_asset& quantity, const name& beneficiary);
+         void lock(const name& owner, const asset& quantity, const name& beneficiary);
 
          [[eosio::action]]
          void withdraw(const name& caller, const checksum256 action_receipt_digest);
