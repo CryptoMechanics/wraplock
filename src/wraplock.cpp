@@ -223,15 +223,15 @@ void token::withdraw(const name& caller, const checksum256 action_receipt_digest
 
 }
 
-void token::clear()
+void token::clear(const name extaccount)
 { 
-  check(global_config.exists(), "contract must be initialized first");
+  require_auth( _self );
 
-  // todo - tidy this so all data is cleared (iterate over scopes)
+  check(global_config.exists(), "contract must be initialized first");
 
   // if (global_config.exists()) global_config.remove();
 
-  extaccounts e_table( get_self(), "genesis11111"_n.value);
+  extaccounts e_table( get_self(), extaccount.value);
 
   while (e_table.begin() != e_table.end()) {
     auto itr = e_table.end();
@@ -245,19 +245,10 @@ void token::clear()
     _reservestable.erase(itr);
   }
 
-  auto global = global_config.get();
-  proofstable _proofstable(global.bridge_contract, global.bridge_contract.value);
-
-  while (_proofstable.begin() != _proofstable.end()) {
-    auto itr = _proofstable.end();
+  while (_processedtable.begin() != _processedtable.end()) {
+    auto itr = _processedtable.end();
     itr--;
-    _proofstable.erase(itr);
-  }
-
-  while (_proofstable.begin() != _proofstable.end()) {
-    auto itr = _proofstable.end();
-    itr--;
-    _proofstable.erase(itr);
+    _processedtable.erase(itr);
   }
 
 /*

@@ -103,7 +103,7 @@ namespace eosio {
 
 
          [[eosio::action]]
-         void clear();
+         void clear(const name extaccount);
 
         [[eosio::on_notify("*::transfer")]] void deposit(name from, name to, asset quantity, string memo);
 
