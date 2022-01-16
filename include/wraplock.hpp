@@ -26,19 +26,35 @@ namespace eosio {
             checksum256   chain_id;
             name          bridge_contract;
             name          native_token_contract;
+            symbol        native_token_symbol;
             checksum256   paired_chain_id;
             name          paired_liquid_wraptoken_contract;
             name          paired_staked_wraptoken_contract;
          } globalrow;
 
          struct [[eosio::table]] account {
-            name     owner;
-            asset    liquid_balance;
-            asset    locked_balance;
-            asset    staked_balance;
-            asset    unstaking_balance;
+            name        owner;
+            asset       liquid_balance;
+            asset       locked_balance;
 
-            uint64_t primary_key()const { return owner.value; }
+            asset       staked_balance;
+            time_point  stake_weighted_days_last_updated;
+            uint64_t    stake_weighted_days_owed;
+
+            asset       unstaking_balance;
+            time_point  unstaking_due;
+
+            uint64_t primary_key() const { return owner.value; }
+         };
+
+         // represents the queue for unstaking events to be included in aggregate sellrex
+         struct [[eosio::table]] unstaking {
+            name        owner;
+            asset       quantity;
+            time_point  started;
+
+            uint64_t primary_key() const { return owner.value; }
+            uint64_t by_started() const { return started.sec_since_epoch(); }
          };
 
 
@@ -54,6 +70,7 @@ namespace eosio {
          void sub_unstaking_balance( const name& owner, const asset& value );
          void add_unstaking_balance( const name& owner, const asset& value );
 
+         uint64_t calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated);
       public:
          using contract::contract;
 
@@ -93,7 +110,7 @@ namespace eosio {
 
 
          [[eosio::action]]
-         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract);
+         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract);
 
 
          [[eosio::action]]
@@ -110,11 +127,11 @@ namespace eosio {
       
 
          [[eosio::action]]
-         void open( const name& owner, const symbol& symbol, const name& ram_payer );
+         void open( const name& owner, const name& ram_payer );
 
 
          [[eosio::action]]
-         void close( const name& owner, const symbol& symbol );
+         void close( const name& owner );
 
          [[eosio::action]]
          void emitxfer(const token::xfer& xfer);
@@ -127,6 +144,9 @@ namespace eosio {
 
 
          typedef eosio::multi_index< "accounts"_n, account > accountstable;
+
+         typedef eosio::multi_index< "unstaking"_n, unstaking,
+            indexed_by<"started"_n, const_mem_fun<unstaking, uint64_t, &unstaking::by_started>>> unstakingtable;
 
          typedef eosio::multi_index< "proofs"_n, validproof,
             indexed_by<"digest"_n, const_mem_fun<validproof, checksum256, &validproof::by_digest>>> proofstable;
@@ -144,12 +164,15 @@ namespace eosio {
 
          accountstable _accountstable;
 
+         unstakingtable _unstakingtable;
+
         processedtable _processedtable;
 
         token( name receiver, name code, datastream<const char*> ds ) :
         contract(receiver, code, ds),
         global_config(_self, _self.value),
         _accountstable(_self, _self.value),
+        _unstakingtable(_self, _self.value),
         _processedtable(_self, _self.value)
         {
         

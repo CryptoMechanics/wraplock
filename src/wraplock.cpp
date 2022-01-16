@@ -35,7 +35,14 @@ void token::add_or_assert(const validproof& proof, const name& payer){
 
 }
 
-void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract)
+uint64_t token::calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated) {
+    uint32_t seconds_since_last_update = current_time_point().sec_since_epoch() - stake_weighted_days_last_updated.sec_since_epoch();
+    uint32_t full_days_since_last_update = seconds_since_last_update / 86400;
+    uint64_t owed = full_days_since_last_update * (staked_balance.amount / 10000);
+    return owed;
+}
+
+void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract)
 {
     require_auth( _self );
 
@@ -43,8 +50,10 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
     global.chain_id = chain_id;
     global.bridge_contract = bridge_contract;
     global.native_token_contract = native_token_contract;
+    global.native_token_symbol = native_token_symbol;
     global.paired_chain_id = paired_chain_id;
     global.paired_liquid_wraptoken_contract = paired_liquid_wraptoken_contract;
+    global.paired_staked_wraptoken_contract = paired_staked_wraptoken_contract;
     global_config.set(global, _self);
 
 }
@@ -62,6 +71,23 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
 
   if (stake) {
     add_staked_balance( owner, quantity );
+
+    // buy rex on EOS
+    action deposit_act(
+      permission_level{_self, "active"_n},
+      "eosio"_n, "deposit"_n,
+      std::make_tuple( _self, quantity )
+    );
+    deposit_act.send();
+
+    action buyrex_act(
+      permission_level{_self, "active"_n},
+      "eosio"_n, "buyrex"_n,
+      std::make_tuple( _self, quantity )
+    );
+    buyrex_act.send();
+
+
   } else {
     add_locked_balance( owner, quantity );
   }
@@ -178,16 +204,25 @@ void token::sub_staked_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
     check( account.staked_balance.amount >= value.amount, "overdrawn liquid balance" );
+
+    uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
+
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance -= value;
+        a.stake_weighted_days_last_updated = current_time_point();
+        a.stake_weighted_days_owed += owed;
     });
 }
 
 void token::add_staked_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
+    uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
+
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance += value;
+        a.stake_weighted_days_last_updated = current_time_point();
+        a.stake_weighted_days_owed += owed;
     });
 }
 
@@ -205,10 +240,27 @@ void token::add_unstaking_balance( const name& owner, const asset& value ){
 
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.unstaking_balance += value;
+        a.unstaking_due = time_point(seconds(current_time_point().sec_since_epoch() + (86400 * 4))); // unstaking take 4 days
     });
+
+    // add this to queue of unstaking events to be serviced every n days, or replace existing if already present
+    auto unstaking_itr = _unstakingtable.find(owner.value);
+    if (unstaking_itr == _unstakingtable.end()){
+        _unstakingtable.emplace( owner, [&]( auto& u ){
+            u.owner = owner;
+            u.quantity = value;
+            u.started = current_time_point();
+        });
+    } else {
+        _unstakingtable.modify( unstaking_itr, same_payer, [&]( auto& u ) {
+            u.quantity = value;
+            u.started = current_time_point();
+        });
+    }
+
 }
 
-void token::open( const name& owner, const symbol& symbol, const name& ram_payer )
+void token::open( const name& owner, const name& ram_payer )
 {
    check(global_config.exists(), "contract must be initialized first");
 
@@ -220,15 +272,20 @@ void token::open( const name& owner, const symbol& symbol, const name& ram_payer
 
     _accountstable.emplace( ram_payer, [&]( auto& a ){
         a.owner = owner;
-        a.liquid_balance = asset(0, symbol);
-        a.locked_balance = asset(0, symbol);
-        a.staked_balance = asset(0, symbol);
-        a.unstaking_balance = asset(0, symbol);
+        a.liquid_balance = asset(0, global.native_token_symbol);
+        a.locked_balance = asset(0, global.native_token_symbol);
+
+        a.staked_balance = asset(0, global.native_token_symbol);
+        a.stake_weighted_days_last_updated = current_time_point();
+        a.stake_weighted_days_owed = 0;
+
+        a.unstaking_balance = asset(0, global.native_token_symbol);
+        a.unstaking_due = current_time_point();
     });
 
 }
 
-void token::close( const name& owner, const symbol& symbol )
+void token::close( const name& owner )
 {
    check(global_config.exists(), "contract must be initialized first");
 
@@ -240,6 +297,7 @@ void token::close( const name& owner, const symbol& symbol )
    check( it->locked_balance.amount == 0, "Cannot close because the locked balance is not zero." );
    check( it->staked_balance.amount == 0, "Cannot close because the staked balance is not zero." );
    check( it->unstaking_balance.amount == 0, "Cannot close because the unstaking balance is not zero." );
+   check( it->stake_weighted_days_owed == 0, "Cannot close because the stake_weighted_days balance is not zero." );
    _accountstable.erase( it );
 
 }
@@ -256,7 +314,8 @@ void token::deposit(name from, name to, asset quantity, string memo)
     //if incoming transfer
     if (from == "eosio.stake"_n) return ; //ignore unstaking transfers
     else if (from == "eosio.rex"_n) {
-        // todo - apportion returns to those with staked balances
+
+        // todo - check whether anything needs doing when rex rewards are returned
 
     }
     else if (to == get_self() && from != get_self()) {
