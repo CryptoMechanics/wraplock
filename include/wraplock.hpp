@@ -42,7 +42,6 @@ namespace eosio {
             uint64_t    stake_weighted_days_owed;
 
             asset       unstaking_balance;
-            time_point  unstaking_due;
 
             uint64_t primary_key() const { return owner.value; }
          };

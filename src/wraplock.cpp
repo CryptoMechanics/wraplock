@@ -286,7 +286,6 @@ void token::add_unstaking_balance( const name& owner, const asset& value ){
 
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.unstaking_balance += value;
-        a.unstaking_due = time_point(seconds(current_time_point().sec_since_epoch() + (86400 * 4))); // unstaking take 4 days
     });
 }
 
@@ -310,7 +309,6 @@ void token::open( const name& owner, const name& ram_payer )
         a.stake_weighted_days_owed = 0;
 
         a.unstaking_balance = asset(0, global.native_token_symbol);
-        a.unstaking_due = current_time_point();
     });
 
 }
