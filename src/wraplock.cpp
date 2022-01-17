@@ -379,22 +379,46 @@ void token::withdraw( const name& owner, const asset& quantity ){
 void token::processqueue( const uint64_t count )
 {
     const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
+    const asset matured_rex = asset(rex_balance.matured_rex, symbol("REX", 4));
 
     auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
 
-    uint64_t total_rex_allocated = 0;
+    asset rex_to_sell = asset(0, symbol("REX", 4));
     for (uint64_t i = 0; i < count; i++) {
         auto itr = _unstakingtable_by_start.begin();
         if ( itr != _unstakingtable_by_start.end() ) {
             asset rex_quantity = itr->quantity;
-            asset eos_quantity = asset(rex_quantity.amount / 10000, symbol("EOS", 4));
-            if (rex_balance.matured_rex >= rex_quantity.amount) {
+            if (matured_rex - rex_to_sell >= rex_quantity) {
+                asset eos_quantity = asset(rex_quantity.amount / 10000, symbol("EOS", 4));
                 sub_unstaking_balance(itr->owner, eos_quantity);
                 add_liquid_balance(itr->owner, eos_quantity);
-                total_rex_allocated += rex_quantity.amount;
+                rex_to_sell += rex_quantity;
                 _unstakingtable_by_start.erase(itr);
+            } else {
+                break; // stop at first request that can't be fulfilled
             }
         }
+    }
+
+    if (rex_to_sell.amount > 0) {
+
+        // sell rex
+        asset eos_to_withdraw = asset(rex_to_sell.amount / 10000, symbol("EOS", 4));
+
+        action sellrex_act(
+          permission_level{_self, "active"_n},
+          "eosio"_n, "sellrex"_n,
+          std::make_tuple( _self, rex_to_sell )
+        );
+        sellrex_act.send();
+
+        action withdraw_act(
+          permission_level{_self, "active"_n},
+          "eosio"_n, "withdraw"_n,
+          std::make_tuple( _self, eos_to_withdraw )
+        );
+        withdraw_act.send();
+
     }
 }
 
