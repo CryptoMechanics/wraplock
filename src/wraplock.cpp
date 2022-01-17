@@ -72,7 +72,7 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
   if (stake) {
     add_staked_balance( owner, quantity );
 
-    // buy rex on EOS
+    // buy rex
     action deposit_act(
       permission_level{_self, "active"_n},
       "eosio"_n, "deposit"_n,
@@ -152,8 +152,54 @@ void token::unstake(const name& caller, const checksum256 action_receipt_digest)
 
     check(proof.action.name == "emitxfer"_n, "must provide proof of token retiring before issuing");
 
-    sub_staked_balance( redeem_act.beneficiary, redeem_act.quantity.quantity );
-    add_unstaking_balance( redeem_act.beneficiary, redeem_act.quantity.quantity );
+    asset eos_quantity = redeem_act.quantity.quantity;
+
+    sub_staked_balance( redeem_act.beneficiary, eos_quantity );
+
+    // todo - check no overflow issue here (in changing EOS to REX)
+    asset rex_quantity = asset(eos_quantity.amount * 10000, symbol("REX", 4));
+
+    // check rexbal to see whether there's enough matured_rex to return tokens
+    const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
+
+    if (rex_balance.matured_rex >= rex_quantity.amount) {
+
+        // sell rex
+        action sellrex_act(
+          permission_level{_self, "active"_n},
+          "eosio"_n, "sellrex"_n,
+          std::make_tuple( _self, rex_quantity )
+        );
+        sellrex_act.send();
+
+        action withdraw_act(
+          permission_level{_self, "active"_n},
+          "eosio"_n, "withdraw"_n,
+          std::make_tuple( _self, eos_quantity )
+        );
+        withdraw_act.send();
+
+        add_liquid_balance( redeem_act.beneficiary, eos_quantity );
+    } else {
+
+        // add this to queue of unstaking events or replace existing if request already present
+        // if unstaking more, the single unstaking event may move down the queue
+        auto unstaking_itr = _unstakingtable.find(redeem_act.beneficiary.value);
+        if (unstaking_itr == _unstakingtable.end()){
+            _unstakingtable.emplace( caller, [&]( auto& u ){
+                u.owner = redeem_act.beneficiary;
+                u.quantity = eos_quantity;
+                u.started = current_time_point();
+            });
+        } else {
+            _unstakingtable.modify( unstaking_itr, same_payer, [&]( auto& u ) {
+                u.quantity += eos_quantity;
+                u.started = current_time_point();
+            });
+        }
+
+        add_unstaking_balance( redeem_act.beneficiary, eos_quantity );
+    }
 
 }
 
@@ -242,22 +288,6 @@ void token::add_unstaking_balance( const name& owner, const asset& value ){
         a.unstaking_balance += value;
         a.unstaking_due = time_point(seconds(current_time_point().sec_since_epoch() + (86400 * 4))); // unstaking take 4 days
     });
-
-    // add this to queue of unstaking events to be serviced every n days, or replace existing if already present
-    auto unstaking_itr = _unstakingtable.find(owner.value);
-    if (unstaking_itr == _unstakingtable.end()){
-        _unstakingtable.emplace( owner, [&]( auto& u ){
-            u.owner = owner;
-            u.quantity = value;
-            u.started = current_time_point();
-        });
-    } else {
-        _unstakingtable.modify( unstaking_itr, same_payer, [&]( auto& u ) {
-            u.quantity = value;
-            u.started = current_time_point();
-        });
-    }
-
 }
 
 void token::open( const name& owner, const name& ram_payer )
@@ -364,6 +394,12 @@ void token::clear(const name extaccount)
     auto itr = _processedtable.end();
     itr--;
     _processedtable.erase(itr);
+  }
+
+  while (_unstakingtable.begin() != _unstakingtable.end()) {
+    auto itr = _unstakingtable.end();
+    itr--;
+    _unstakingtable.erase(itr);
   }
 
 /*

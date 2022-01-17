@@ -108,6 +108,18 @@ namespace eosio {
            bool             staked;
          };
 
+         // for checking for sufficient matured tokens before sellrex
+         struct [[eosio::table]] rex_balance {
+            uint8_t version = 0;
+            name    owner;
+            asset   vote_stake;
+            asset   rex_balance;
+            int64_t matured_rex = 0;
+            std::deque<std::pair<time_point_sec, int64_t>> rex_maturities; /// REX daily maturity buckets
+
+            uint64_t primary_key()const { return owner.value; }
+         };
+
 
          [[eosio::action]]
          void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract);
@@ -154,6 +166,8 @@ namespace eosio {
          typedef eosio::multi_index< "processed"_n, processed,
             indexed_by<"digest"_n, const_mem_fun<processed, checksum256, &processed::by_digest>>> processedtable;
 
+         typedef eosio::multi_index< "rexbal"_n, rex_balance > rexbaltable;
+
          using globaltable = eosio::singleton<"global"_n, global>;
 
          void add_or_assert(const validproof& proof, const name& prover);
@@ -168,12 +182,15 @@ namespace eosio {
 
         processedtable _processedtable;
 
+        rexbaltable _rexbaltable;
+
         token( name receiver, name code, datastream<const char*> ds ) :
         contract(receiver, code, ds),
         global_config(_self, _self.value),
         _accountstable(_self, _self.value),
         _unstakingtable(_self, _self.value),
-        _processedtable(_self, _self.value)
+        _processedtable(_self, _self.value),
+        _rexbaltable("eosio"_n, "eosio"_n.value)
         {
         
         }
