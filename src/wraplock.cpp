@@ -376,6 +376,28 @@ void token::withdraw( const name& owner, const asset& quantity ){
 
 }
 
+void token::processqueue( const uint64_t count )
+{
+    const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
+
+    auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
+
+    uint64_t total_rex_allocated = 0;
+    for (uint64_t i = 0; i < count; i++) {
+        auto itr = _unstakingtable_by_start.begin();
+        if ( itr != _unstakingtable_by_start.end() ) {
+            asset rex_quantity = itr->quantity;
+            asset eos_quantity = asset(rex_quantity.amount / 10000, symbol("EOS", 4));
+            if (rex_balance.matured_rex >= rex_quantity.amount) {
+                sub_unstaking_balance(itr->owner, eos_quantity);
+                add_liquid_balance(itr->owner, eos_quantity);
+                total_rex_allocated += rex_quantity.amount;
+                _unstakingtable_by_start.erase(itr);
+            }
+        }
+    }
+}
+
 void token::clear(const name extaccount)
 { 
   require_auth( _self );
