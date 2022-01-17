@@ -121,19 +121,38 @@ namespace eosio {
          };
 
 
+         /**
+          * set contract globals (required before use)
+          */
          [[eosio::action]]
          void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract);
 
 
+         /**
+          * called to commit deposited tokens to the interchain transfer process
+          * optionally also stakes the tokens to REX
+          */
          [[eosio::action]]
          void lock(const name& owner, const asset& quantity, const name& beneficiary, const bool stake);
 
+         /**
+          * called to use a proof of retirement of liquid wrapped tokens
+          * returns locked tokens to the appropiate liquid balance
+          */
          [[eosio::action]]
          void unlock(const name& caller, const checksum256 action_receipt_digest);
 
+         /**
+          * called to use a proof of retirement of staked wrapped tokens
+          * if sufficient matured_rex is available, returns staked tokens to the appropiate liquid balance
+          * if insufficient, moves staked tokens to the unstaking balance and adds an unstaking record to the queue
+          */
          [[eosio::action]]
          void unstake(const name& caller, const checksum256 action_receipt_digest);
 
+         /**
+          * transfers liquid tokens to the owners account
+          */
          [[eosio::action]]
          void withdraw(const name& owner, const asset& quantity);
       
@@ -148,6 +167,13 @@ namespace eosio {
          [[eosio::action]]
          void emitxfer(const token::xfer& xfer);
 
+         /**
+          * attempts to fulfill unstaking requests from the queue in fifo order
+          * moves unstaking to liquid balances for all requests fulfilled
+          * stops after count requests, or if there is insufficient matured_rex available for the next request
+          */
+         [[eosio::action]]
+         void processqueue( const uint64_t count );
 
          [[eosio::action]]
          void clear(const name extaccount);
