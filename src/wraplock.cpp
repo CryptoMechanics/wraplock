@@ -129,9 +129,13 @@ void token::unlock(const name& caller, const checksum256 action_receipt_digest){
 
     check(proof.action.name == "emitxfer"_n, "must provide proof of token retiring before issuing");
 
-    sub_locked_balance( redeem_act.beneficiary, redeem_act.quantity.quantity );
-    add_liquid_balance( redeem_act.beneficiary, redeem_act.quantity.quantity );
+    _unlock( redeem_act.beneficiary, redeem_act.quantity.quantity );
 
+}
+
+void token::_unlock( const name& beneficiary, const asset& quantity ) {
+    sub_locked_balance( beneficiary, quantity );
+    add_liquid_balance( beneficiary, quantity );
 }
 
 void token::unstake(const name& caller, const checksum256 action_receipt_digest){
@@ -152,9 +156,15 @@ void token::unstake(const name& caller, const checksum256 action_receipt_digest)
 
     check(proof.action.name == "emitxfer"_n, "must provide proof of token retiring before issuing");
 
-    asset eos_quantity = redeem_act.quantity.quantity;
+    _unstake( caller, redeem_act.beneficiary, redeem_act.quantity.quantity );
 
-    sub_staked_balance( redeem_act.beneficiary, eos_quantity );
+}
+
+void token::_unstake( const name& caller, const name& beneficiary, const asset& quantity ) {
+
+    asset eos_quantity = quantity;
+
+    sub_staked_balance( beneficiary, eos_quantity );
 
     // todo - check no overflow issue here (in changing EOS to REX)
     asset rex_quantity = asset(eos_quantity.amount * 10000, symbol("REX", 4));
@@ -179,15 +189,15 @@ void token::unstake(const name& caller, const checksum256 action_receipt_digest)
         );
         withdraw_act.send();
 
-        add_liquid_balance( redeem_act.beneficiary, eos_quantity );
+        add_liquid_balance( beneficiary, eos_quantity );
     } else {
 
         // add this to queue of unstaking events or replace existing if request already present
         // if unstaking more, the single unstaking event may move down the queue
-        auto unstaking_itr = _unstakingtable.find(redeem_act.beneficiary.value);
+        auto unstaking_itr = _unstakingtable.find(beneficiary.value);
         if (unstaking_itr == _unstakingtable.end()){
             _unstakingtable.emplace( caller, [&]( auto& u ){
-                u.owner = redeem_act.beneficiary;
+                u.owner = beneficiary;
                 u.quantity = eos_quantity;
                 u.started = current_time_point();
             });
@@ -198,7 +208,7 @@ void token::unstake(const name& caller, const checksum256 action_receipt_digest)
             });
         }
 
-        add_unstaking_balance( redeem_act.beneficiary, eos_quantity );
+        add_unstaking_balance( beneficiary, eos_quantity );
     }
 
 }
@@ -420,37 +430,55 @@ void token::processqueue( const uint64_t count )
     }
 }
 
-void token::clear(const name extaccount)
-{ 
-  require_auth( _self );
+#ifdef INCLUDE_TEST_ACTIONS
 
-  check(global_config.exists(), "contract must be initialized first");
+    // test action to unlock without proof
+    void token::tstunlock( const name& caller, const name& beneficiary, const asset& quantity ) {
+        check(global_config.exists(), "contract must be initialized first");
+        require_auth( caller );
+        _unlock( beneficiary, quantity );
+    }
 
-  // if (global_config.exists()) global_config.remove();
+    // test action to unstake without proof
+    void token::tstunstake( const name& caller, const name& beneficiary, const asset& quantity ) {
+        check(global_config.exists(), "contract must be initialized first");
+        require_auth( caller );
+        _unstake( caller, beneficiary, quantity );
+    }
 
-  while (_accountstable.begin() != _accountstable.end()) {
-    auto itr = _accountstable.end();
-    itr--;
-    _accountstable.erase(itr);
-  }
+#endif
 
-  while (_processedtable.begin() != _processedtable.end()) {
-    auto itr = _processedtable.end();
-    itr--;
-    _processedtable.erase(itr);
-  }
+#ifdef INCLUDE_CLEAR_ACTION
 
-  while (_unstakingtable.begin() != _unstakingtable.end()) {
-    auto itr = _unstakingtable.end();
-    itr--;
-    _unstakingtable.erase(itr);
-  }
+    void token::clear(const name extaccount)
+    {
+      require_auth( _self );
 
-/*
-proofstable
+      check(global_config.exists(), "contract must be initialized first");
 
-*/
-}
+      // if (global_config.exists()) global_config.remove();
+
+      while (_accountstable.begin() != _accountstable.end()) {
+        auto itr = _accountstable.end();
+        itr--;
+        _accountstable.erase(itr);
+      }
+
+      while (_processedtable.begin() != _processedtable.end()) {
+        auto itr = _processedtable.end();
+        itr--;
+        _processedtable.erase(itr);
+      }
+
+      while (_unstakingtable.begin() != _unstakingtable.end()) {
+        auto itr = _unstakingtable.end();
+        itr--;
+        _unstakingtable.erase(itr);
+      }
+
+    }
+
+#endif
 
 } /// namespace eosio
 

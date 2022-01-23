@@ -1,3 +1,7 @@
+// comment out the following lines to remove clear and test actions for production deployment
+#define INCLUDE_CLEAR_ACTION
+#define INCLUDE_TEST_ACTIONS
+
 #pragma once
 
 #include <eosio/asset.hpp>
@@ -68,6 +72,9 @@ namespace eosio {
 
          void sub_unstaking_balance( const name& owner, const asset& value );
          void add_unstaking_balance( const name& owner, const asset& value );
+
+         void _unlock( const name& beneficiary, const asset& quantity );
+         void _unstake( const name& caller, const name& beneficiary, const asset& quantity );
 
          uint64_t calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated);
       public:
@@ -174,8 +181,24 @@ namespace eosio {
          [[eosio::action]]
          void processqueue( const uint64_t count );
 
-         [[eosio::action]]
-         void clear(const name extaccount);
+         /**
+          * testing actions to be removed in production
+          */
+         #ifdef INCLUDE_TEST_ACTIONS
+
+            [[eosio::action]]
+            void tstunlock( const name& caller, const name& beneficiary, const asset& quantity );
+
+            [[eosio::action]]
+            void tstunstake( const name& caller, const name& beneficiary, const asset& quantity );
+
+         #endif
+
+         #ifdef INCLUDE_CLEAR_ACTION
+            [[eosio::action]]
+            void clear(const name extaccount);
+
+         #endif
 
         [[eosio::on_notify("*::transfer")]] void deposit(name from, name to, asset quantity, string memo);
 
