@@ -295,6 +295,7 @@ void token::sub_staked_balance( const name& owner, const asset& value ){
     check( account.staked_balance.amount >= value.amount, "overdrawn staked balance" );
 
     uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
+    print("calculated_owed_stake_weighted_days: ", owed, "\n");
 
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance -= value;
@@ -307,6 +308,7 @@ void token::add_staked_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
     uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
+    print("calculated_owed_stake_weighted_days: ", owed, "\n");
 
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance += value;
