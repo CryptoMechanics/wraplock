@@ -126,6 +126,19 @@ namespace eosio {
             uint64_t primary_key()const { return owner.value; }
          };
 
+         struct [[eosio::table]] rex_pool {
+            uint8_t    version = 0;
+            asset      total_lent;
+            asset      total_unlent;
+            asset      total_rent;
+            asset      total_lendable;
+            asset      total_rex;
+            asset      namebid_proceeds;
+            uint64_t   loan_num = 0;
+
+            uint64_t primary_key()const { return 0; }
+         };
+
 
          /**
           * set contract globals (required before use)
@@ -215,6 +228,7 @@ namespace eosio {
             indexed_by<"digest"_n, const_mem_fun<processed, checksum256, &processed::by_digest>>> processedtable;
 
          typedef eosio::multi_index< "rexbal"_n, rex_balance > rexbaltable;
+         typedef eosio::multi_index< "rexpool"_n, rex_pool > rexpooltable;
 
          using globaltable = eosio::singleton<"global"_n, global>;
 
@@ -231,6 +245,7 @@ namespace eosio {
         processedtable _processedtable;
 
         rexbaltable _rexbaltable;
+        rexpooltable _rexpooltable;
 
         token( name receiver, name code, datastream<const char*> ds ) :
         contract(receiver, code, ds),
@@ -238,7 +253,8 @@ namespace eosio {
         _accountstable(_self, _self.value),
         _unstakingtable(_self, _self.value),
         _processedtable(_self, _self.value),
-        _rexbaltable("eosio"_n, "eosio"_n.value)
+        _rexbaltable("eosio"_n, "eosio"_n.value),
+        _rexpooltable("eosio"_n, "eosio"_n.value)
         {
         
         }

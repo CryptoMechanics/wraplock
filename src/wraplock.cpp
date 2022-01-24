@@ -167,10 +167,24 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
     sub_staked_balance( beneficiary, eos_quantity );
 
     // todo - check no overflow issue here (in changing EOS to REX)
-    asset rex_quantity = asset(eos_quantity.amount * 10000, symbol("REX", 4));
+
+    // Calculate REX required to return at least the requested quantity of EOS
+    // There may be more EOS returned than needed, in which case the excess will remain in rex system
+    // It should never be less, assuming the EOS/REX rate may only increase
+    // todo - add action to allow any extra EOS to be reinvested in rex by a management script?
+    const auto& rex_pool = _rexpooltable.get( 0, "no rex pool object found" );
+    const uint32_t approx_rex_rate = rex_pool.total_rex.amount / rex_pool.total_lendable.amount;
+    asset rex_quantity = asset(eos_quantity.amount * approx_rex_rate, symbol("REX", 4));
+    print("approx_rex_rate: ", approx_rex_rate, "\n");
+    print("rex_quantity: ", rex_quantity, "\n");
 
     // check rexbal to see whether there's enough matured_rex to return tokens
     const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
+
+    print("rex_balance.matured_rex: ", rex_balance.matured_rex, "\n");
+    print("rex_quantity.amount: ", rex_quantity.amount, "\n");
+
+    // todo - check there is no unstaking queue too, to ensure it is serviced first
 
     if (rex_balance.matured_rex >= rex_quantity.amount) {
 
@@ -242,7 +256,7 @@ void token::add_liquid_balance( const name& owner, const asset& value ){
 void token::sub_locked_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
-    check( account.locked_balance.amount >= value.amount, "overdrawn liquid balance" );
+    check( account.locked_balance.amount >= value.amount, "overdrawn locked balance" );
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.locked_balance -= value;
     });
@@ -259,7 +273,7 @@ void token::add_locked_balance( const name& owner, const asset& value ){
 void token::sub_staked_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
-    check( account.staked_balance.amount >= value.amount, "overdrawn liquid balance" );
+    check( account.staked_balance.amount >= value.amount, "overdrawn staked balance" );
 
     uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
 
@@ -285,7 +299,7 @@ void token::add_staked_balance( const name& owner, const asset& value ){
 void token::sub_unstaking_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
-    check( account.unstaking_balance.amount >= value.amount, "overdrawn liquid balance" );
+    check( account.unstaking_balance.amount >= value.amount, "overdrawn unstaking balance" );
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.unstaking_balance -= value;
     });
@@ -386,8 +400,15 @@ void token::withdraw( const name& owner, const asset& quantity ){
 
 void token::processqueue( const uint64_t count )
 {
+    // anyone can call this
+
     const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
     const asset matured_rex = asset(rex_balance.matured_rex, symbol("REX", 4));
+    print("matured_rex: ", matured_rex, "\n");
+
+    const auto& rex_pool = _rexpooltable.get( 0, "no rex pool object found" );
+    const uint32_t approx_rex_rate = rex_pool.total_rex.amount / rex_pool.total_lendable.amount;
+    print("approx_rex_rate: ", approx_rex_rate, "\n");
 
     auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
 
@@ -395,14 +416,20 @@ void token::processqueue( const uint64_t count )
     for (uint64_t i = 0; i < count; i++) {
         auto itr = _unstakingtable_by_start.begin();
         if ( itr != _unstakingtable_by_start.end() ) {
-            asset rex_quantity = itr->quantity;
+            print("owner: ", itr->owner, "\n");
+            asset eos_quantity = itr->quantity;
+            print("eos_quantity: ", eos_quantity, "\n");
+            asset rex_quantity = asset(eos_quantity.amount * approx_rex_rate, symbol("REX", 4));
+            print("rex_quantity: ", rex_quantity, "\n");
+
             if (matured_rex - rex_to_sell >= rex_quantity) {
-                asset eos_quantity = asset(rex_quantity.amount / 10000, symbol("EOS", 4));
                 sub_unstaking_balance(itr->owner, eos_quantity);
                 add_liquid_balance(itr->owner, eos_quantity);
                 rex_to_sell += rex_quantity;
                 _unstakingtable_by_start.erase(itr);
+                print("Fulfilled!\n\n");
             } else {
+                print("Not Fulfilled!\n");
                 break; // stop at first request that can't be fulfilled
             }
         }
@@ -411,7 +438,7 @@ void token::processqueue( const uint64_t count )
     if (rex_to_sell.amount > 0) {
 
         // sell rex
-        asset eos_to_withdraw = asset(rex_to_sell.amount / 10000, symbol("EOS", 4));
+        asset eos_to_withdraw = asset(rex_to_sell.amount / approx_rex_rate, symbol("EOS", 4));
 
         action sellrex_act(
           permission_level{_self, "active"_n},
