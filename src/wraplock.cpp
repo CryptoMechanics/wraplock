@@ -184,9 +184,9 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
     print("rex_balance.matured_rex: ", rex_balance.matured_rex, "\n");
     print("rex_quantity.amount: ", rex_quantity.amount, "\n");
 
-    // todo - check there is no unstaking queue too, to ensure it is serviced first
+    bool empty_unstaking_queue = _unstakingtable.begin() == _unstakingtable.end();
 
-    if (rex_balance.matured_rex >= rex_quantity.amount) {
+    if (empty_unstaking_queue && (rex_balance.matured_rex >= rex_quantity.amount)) {
 
         // sell rex
         action sellrex_act(
