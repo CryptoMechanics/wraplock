@@ -38,10 +38,12 @@ void token::add_or_assert(const validproof& proof, const name& payer){
 // return amount of rex immediately available
 asset token::get_matured_rex() {
     const time_point_sec now = current_time_point();
-    const auto& rb = _rexbaltable.get( _self.value, "no rex balance object found" );
+    auto& rb = _rexbaltable.get( _self.value, "no rex balance object found" );
     int64_t matured_rex = rb.matured_rex;
-    while ( !rb.rex_maturities.empty() && rb.rex_maturities.front().first <= now ) {
-        matured_rex += rb.rex_maturities.front().second;
+    for (auto m : rb.rex_maturities) {
+        if (m.first <= now) {
+            matured_rex += m.second;
+        }
     }
     return asset(matured_rex, symbol("REX", 4));
 }
