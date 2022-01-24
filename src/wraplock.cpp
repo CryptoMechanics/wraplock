@@ -35,6 +35,17 @@ void token::add_or_assert(const validproof& proof, const name& payer){
 
 }
 
+// return amount of rex immediately available
+asset token::get_matured_rex() {
+    const time_point_sec now = current_time_point();
+    const auto& rb = _rexbaltable.get( _self.value, "no rex balance object found" );
+    int64_t matured_rex = rb.matured_rex;
+    while ( !rb.rex_maturities.empty() && rb.rex_maturities.front().first <= now ) {
+        matured_rex += rb.rex_maturities.front().second;
+    }
+    return asset(matured_rex, symbol("REX", 4));
+}
+
 uint64_t token::calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated) {
     uint32_t seconds_since_last_update = current_time_point().sec_since_epoch() - stake_weighted_days_last_updated.sec_since_epoch();
     uint32_t full_days_since_last_update = seconds_since_last_update / 86400;
@@ -179,14 +190,12 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
     print("rex_quantity: ", rex_quantity, "\n");
 
     // check rexbal to see whether there's enough matured_rex to return tokens
-    const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
-
-    print("rex_balance.matured_rex: ", rex_balance.matured_rex, "\n");
-    print("rex_quantity.amount: ", rex_quantity.amount, "\n");
+    asset matured_rex = get_matured_rex();
+    print("matured_rex: ", matured_rex, "\n");
 
     bool empty_unstaking_queue = _unstakingtable.begin() == _unstakingtable.end();
 
-    if (empty_unstaking_queue && (rex_balance.matured_rex >= rex_quantity.amount)) {
+    if (empty_unstaking_queue && (matured_rex >= rex_quantity)) {
 
         // sell rex
         action sellrex_act(
@@ -204,6 +213,14 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
         withdraw_act.send();
 
         add_liquid_balance( beneficiary, eos_quantity );
+
+        action unstaked_act(
+            permission_level{_self, "active"_n},
+            _self, "unstaked"_n,
+            std::make_tuple(beneficiary, eos_quantity)
+        );
+        unstaked_act.send();
+
     } else {
 
         // add this to queue of unstaking events or replace existing if request already present
@@ -403,7 +420,7 @@ void token::processqueue( const uint64_t count )
     // anyone can call this
 
     const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
-    const asset matured_rex = asset(rex_balance.matured_rex, symbol("REX", 4));
+    const asset matured_rex = get_matured_rex();
     print("matured_rex: ", matured_rex, "\n");
 
     const auto& rex_pool = _rexpooltable.get( 0, "no rex pool object found" );
@@ -425,6 +442,14 @@ void token::processqueue( const uint64_t count )
             if (matured_rex - rex_to_sell >= rex_quantity) {
                 sub_unstaking_balance(itr->owner, eos_quantity);
                 add_liquid_balance(itr->owner, eos_quantity);
+
+                action unstaked_act(
+                    permission_level{_self, "active"_n},
+                    _self, "unstaked"_n,
+                    std::make_tuple(itr->owner, eos_quantity)
+                );
+                unstaked_act.send();
+
                 rex_to_sell += rex_quantity;
                 _unstakingtable_by_start.erase(itr);
                 print("Fulfilled!\n\n");
@@ -455,6 +480,11 @@ void token::processqueue( const uint64_t count )
         withdraw_act.send();
 
     }
+}
+
+void token::unstaked( const name& owner, const asset& quantity ) {
+    check(global_config.exists(), "contract must be initialized first");
+    require_auth(_self);
 }
 
 #ifdef INCLUDE_TEST_ACTIONS

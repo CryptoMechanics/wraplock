@@ -76,6 +76,7 @@ namespace eosio {
          void _unlock( const name& beneficiary, const asset& quantity );
          void _unstake( const name& caller, const name& beneficiary, const asset& quantity );
 
+         asset get_matured_rex();
          uint64_t calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated);
       public:
          using contract::contract;
@@ -193,6 +194,9 @@ namespace eosio {
           */
          [[eosio::action]]
          void processqueue( const uint64_t count );
+
+         [[eosio::action]]
+         void unstaked( const name& owner, const asset& quantity );
 
          /**
           * testing actions to be removed in production
