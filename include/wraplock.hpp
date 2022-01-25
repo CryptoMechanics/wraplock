@@ -36,15 +36,16 @@ namespace eosio {
             name          paired_staked_wraptoken_contract;
          } globalrow;
 
+         struct [[eosio::table]] reserve {
+            asset       locked_balance;
+            asset       staked_balance;
+
+            uint64_t primary_key() const { return 0; }
+         };
+
          struct [[eosio::table]] account {
             name        owner;
             asset       liquid_balance;
-            asset       locked_balance;
-
-            asset       staked_balance;
-            time_point  stake_weighted_days_last_updated;
-            uint64_t    stake_weighted_days_owed;
-
             asset       unstaking_balance;
 
             uint64_t primary_key() const { return owner.value; }
@@ -64,11 +65,11 @@ namespace eosio {
          void sub_liquid_balance( const name& owner, const asset& value );
          void add_liquid_balance( const name& owner, const asset& value );
 
-         void sub_locked_balance( const name& owner, const asset& value );
-         void add_locked_balance( const name& owner, const asset& value );
+         void sub_locked_balance( const asset& value );
+         void add_locked_balance( const asset& value );
 
-         void sub_staked_balance( const name& owner, const asset& value );
-         void add_staked_balance( const name& owner, const asset& value );
+         void sub_staked_balance( const asset& value );
+         void add_staked_balance( const asset& value );
 
          void sub_unstaking_balance( const name& owner, const asset& value );
          void add_unstaking_balance( const name& owner, const asset& value );
@@ -77,7 +78,6 @@ namespace eosio {
          void _unstake( const name& caller, const name& beneficiary, const asset& quantity );
 
          asset get_matured_rex();
-         uint64_t calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated);
       public:
          using contract::contract;
 
@@ -221,6 +221,7 @@ namespace eosio {
 
 
          typedef eosio::multi_index< "accounts"_n, account > accountstable;
+         typedef eosio::multi_index< "reserves"_n, reserve > reservestable;
 
          typedef eosio::multi_index< "unstaking"_n, unstaking,
             indexed_by<"started"_n, const_mem_fun<unstaking, uint64_t, &unstaking::by_started>>> unstakingtable;
@@ -242,6 +243,7 @@ namespace eosio {
 
          globaltable global_config;
 
+         reservestable _reservestable;
          accountstable _accountstable;
 
          unstakingtable _unstakingtable;
@@ -254,6 +256,7 @@ namespace eosio {
         token( name receiver, name code, datastream<const char*> ds ) :
         contract(receiver, code, ds),
         global_config(_self, _self.value),
+        _reservestable(_self, _self.value),
         _accountstable(_self, _self.value),
         _unstakingtable(_self, _self.value),
         _processedtable(_self, _self.value),

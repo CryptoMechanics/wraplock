@@ -48,13 +48,6 @@ asset token::get_matured_rex() {
     return asset(matured_rex, symbol("REX", 4));
 }
 
-uint64_t token::calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated) {
-    uint32_t seconds_since_last_update = current_time_point().sec_since_epoch() - stake_weighted_days_last_updated.sec_since_epoch();
-    uint32_t full_days_since_last_update = seconds_since_last_update / 86400;
-    uint64_t owed = full_days_since_last_update * (staked_balance.amount / 10000);
-    return owed;
-}
-
 void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract)
 {
     require_auth( _self );
@@ -69,6 +62,10 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
     global.paired_staked_wraptoken_contract = paired_staked_wraptoken_contract;
     global_config.set(global, _self);
 
+    _reservestable.emplace( _self, [&]( auto& r ){
+        r.locked_balance = asset(0, global.native_token_symbol);
+        r.staked_balance = asset(0, global.native_token_symbol);
+    });
 }
 
 //locks a token amount in the reserve for an interchain transfer
@@ -83,7 +80,7 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
   sub_liquid_balance( owner, quantity );
 
   if (stake) {
-    add_staked_balance( owner, quantity );
+    add_staked_balance( quantity );
 
     // buy rex
     action deposit_act(
@@ -102,7 +99,7 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
 
 
   } else {
-    add_locked_balance( owner, quantity );
+    add_locked_balance( quantity );
   }
 
   auto global = global_config.get();
@@ -147,7 +144,7 @@ void token::unlock(const name& caller, const checksum256 action_receipt_digest){
 }
 
 void token::_unlock( const name& beneficiary, const asset& quantity ) {
-    sub_locked_balance( beneficiary, quantity );
+    sub_locked_balance( quantity );
     add_liquid_balance( beneficiary, quantity );
 }
 
@@ -177,7 +174,7 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
 
     asset eos_quantity = quantity;
 
-    sub_staked_balance( beneficiary, eos_quantity );
+    sub_staked_balance( eos_quantity );
 
     // todo - check no overflow issue here (in changing EOS to REX)
 
@@ -272,48 +269,38 @@ void token::add_liquid_balance( const name& owner, const asset& value ){
     });
 }
 
-void token::sub_locked_balance( const name& owner, const asset& value ){
-    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+void token::sub_locked_balance( const asset& value ){
+    const auto& account = _reservestable.get( 0, "no balance object found" );
 
     check( account.locked_balance.amount >= value.amount, "overdrawn locked balance" );
-    _accountstable.modify( account, same_payer, [&]( auto& a ) {
+    _reservestable.modify( account, same_payer, [&]( auto& a ) {
         a.locked_balance -= value;
     });
 }
 
-void token::add_locked_balance( const name& owner, const asset& value ){
-    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+void token::add_locked_balance( const asset& value ){
+    const auto& account = _reservestable.get( 0, "no balance object found" );
 
-    _accountstable.modify( account, same_payer, [&]( auto& a ) {
+    _reservestable.modify( account, same_payer, [&]( auto& a ) {
         a.locked_balance += value;
     });
 }
 
-void token::sub_staked_balance( const name& owner, const asset& value ){
-    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+void token::sub_staked_balance( const asset& value ){
+    const auto& account = _reservestable.get( 0, "no balance object found" );
 
     check( account.staked_balance.amount >= value.amount, "overdrawn staked balance" );
 
-    uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
-    print("calculated_owed_stake_weighted_days: ", owed, "\n");
-
-    _accountstable.modify( account, same_payer, [&]( auto& a ) {
+    _reservestable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance -= value;
-        a.stake_weighted_days_last_updated = current_time_point();
-        a.stake_weighted_days_owed += owed;
     });
 }
 
-void token::add_staked_balance( const name& owner, const asset& value ){
-    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+void token::add_staked_balance( const asset& value ){
+    const auto& account = _reservestable.get( 0, "no balance object found" );
 
-    uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
-    print("calculated_owed_stake_weighted_days: ", owed, "\n");
-
-    _accountstable.modify( account, same_payer, [&]( auto& a ) {
+    _reservestable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance += value;
-        a.stake_weighted_days_last_updated = current_time_point();
-        a.stake_weighted_days_owed += owed;
     });
 }
 
@@ -347,12 +334,6 @@ void token::open( const name& owner, const name& ram_payer )
     _accountstable.emplace( ram_payer, [&]( auto& a ){
         a.owner = owner;
         a.liquid_balance = asset(0, global.native_token_symbol);
-        a.locked_balance = asset(0, global.native_token_symbol);
-
-        a.staked_balance = asset(0, global.native_token_symbol);
-        a.stake_weighted_days_last_updated = current_time_point();
-        a.stake_weighted_days_owed = 0;
-
         a.unstaking_balance = asset(0, global.native_token_symbol);
     });
 
@@ -367,10 +348,7 @@ void token::close( const name& owner )
    auto it = _accountstable.find( owner.value );
    check( it != _accountstable.end(), "Balance row already deleted or never existed. Action won't have any effect." );
    check( it->liquid_balance.amount == 0, "Cannot close because the liquid balance is not zero." );
-   check( it->locked_balance.amount == 0, "Cannot close because the locked balance is not zero." );
-   check( it->staked_balance.amount == 0, "Cannot close because the staked balance is not zero." );
    check( it->unstaking_balance.amount == 0, "Cannot close because the unstaking balance is not zero." );
-   check( it->stake_weighted_days_owed == 0, "Cannot close because the stake_weighted_days balance is not zero." );
    _accountstable.erase( it );
 
 }
@@ -518,6 +496,12 @@ void token::unstaked( const name& owner, const asset& quantity ) {
       check(global_config.exists(), "contract must be initialized first");
 
       // if (global_config.exists()) global_config.remove();
+
+      while (_reservestable.begin() != _reservestable.end()) {
+        auto itr = _reservestable.end();
+        itr--;
+        _reservestable.erase(itr);
+      }
 
       while (_accountstable.begin() != _accountstable.end()) {
         auto itr = _accountstable.end();
