@@ -72,7 +72,9 @@ asset token::get_rex_purchase_quantity( const asset& eos_quantity ) {
 asset token::get_eos_sale_quantity( const asset& rex_quantity ) {
     auto rexitr = _rexpooltable.begin();
     const int64_t S0 = rexitr->total_lendable.amount;
+    // print("S0/total_lendable.amount: ", rexitr->total_lendable.amount, "\n");
     const int64_t R0 = rexitr->total_rex.amount;
+    // print("R0/total_rex.amount: ", rexitr->total_rex.amount, "\n");
     const int64_t p  = (uint128_t(rex_quantity.amount) * S0) / R0;
     asset proceeds( p, symbol("EOS", 4) );
     return proceeds;
@@ -470,39 +472,64 @@ void token::claimrewards( const name& owner ) {
 
     require_auth( owner );
 
-    // subtract extra REX that isn't covering staked EOS at current price, and add it to claim
-    const auto& account = _accountstable.get( owner.value, "no balance object found" );
-    asset total_rex_eos_equiv = get_eos_sale_quantity(account.rex_balance);
+    auto global = global_config.get();
 
-    asset eos_rewards_from_rex = total_rex_eos_equiv - account.staked_balance;
+    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+
+    // subtract extra REX that isn't covering staked EOS at current price, and add it to claim
+    asset total_rex_eos_equiv = get_eos_sale_quantity(account.rex_balance);
+    print("total_rex_eos_equiv: ", total_rex_eos_equiv, "\n");
+
+    asset eos_rewards_from_rex = total_rex_eos_equiv - (account.staked_balance + account.unstaking_balance);
     print("eos_rewards_from_rex: ", eos_rewards_from_rex, "\n");
 
-    asset rex_to_sell = get_rex_sale_quantity(eos_rewards_from_rex);
-    print("rex_to_sell: ", rex_to_sell, "\n");
+    if (eos_rewards_from_rex.amount > 0) {
+        asset rex_to_sell = get_rex_sale_quantity(eos_rewards_from_rex);
+        print("rex_to_sell: ", rex_to_sell, "\n");
 
-    sub_rex_balance( owner, rex_to_sell );
+        sub_rex_balance( owner, rex_to_sell );
 
-    // sell rex
-    action sellrex_act(
-      permission_level{_self, "active"_n},
-      "eosio"_n, "sellrex"_n,
-      std::make_tuple( _self, rex_to_sell )
-    );
-    sellrex_act.send();
+        // sell rex
+        action sellrex_act(
+          permission_level{_self, "active"_n},
+          "eosio"_n, "sellrex"_n,
+          std::make_tuple( _self, rex_to_sell )
+        );
+        sellrex_act.send();
 
-    action withdraw_act(
-      permission_level{_self, "active"_n},
-      "eosio"_n, "withdraw"_n,
-      std::make_tuple( _self, eos_rewards_from_rex )
-    );
-    withdraw_act.send();
+        action withdraw_act(
+          permission_level{_self, "active"_n},
+          "eosio"_n, "withdraw"_n,
+          std::make_tuple( _self, eos_rewards_from_rex )
+        );
+        withdraw_act.send();
+    }
 
     // todo - calc stake_weighted_days, clear it, and add share of voting proxy rewards to claim
-    print("stake_weighted_days_owed: ", account.stake_weighted_days_owed, "\n");
+    uint64_t stake_weighted_days_owed = account.stake_weighted_days_owed;
+    print("stake_weighted_days_owed_already: ", stake_weighted_days_owed, "\n");
+    uint64_t extra_owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
+    print("extra_stake_weighted_days_owed: ", extra_owed, "\n");
+    stake_weighted_days_owed += extra_owed;
 
-    asset total_eos_quantity = eos_rewards_from_rex;
+    print("total_stake_weighted_days_owed: ", stake_weighted_days_owed, "\n");
 
-    auto global = global_config.get();
+    asset eos_rewards_from_voting_proxy = asset(0, global.native_token_symbol);
+
+    if (stake_weighted_days_owed > 0) {
+
+        // todo - calculate payment for stake_weighted_days_owed, and add to reward
+
+        _accountstable.modify( account, same_payer, [&]( auto& a ) {
+            a.stake_weighted_days_last_updated = current_time_point();
+            a.stake_weighted_days_owed = 0;
+        });
+    }
+
+    asset total_eos_quantity = eos_rewards_from_rex + eos_rewards_from_voting_proxy;
+
+    check(total_eos_quantity.amount > 0, "no rewards to claim");
+
     action act(
       permission_level{_self, "active"_n},
       global.native_token_contract, "transfer"_n,
