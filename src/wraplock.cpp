@@ -55,6 +55,39 @@ uint64_t token::calculated_owed_stake_weighted_days(const asset& staked_balance,
     return owed;
 }
 
+// return amount of REX that would be returned for proposed purchase
+asset token::get_rex_purchase_quantity( const asset& eos_quantity ) {
+    auto itr = _rexpooltable.begin();
+    asset rex_quantity(0, symbol("REX", 4));
+    check( itr->total_lendable.amount > 0, "lendable REX pool is empty" ); // todo - check what to do in this situation
+    const int64_t S0 = itr->total_lendable.amount;
+    const int64_t S1 = S0 + eos_quantity.amount;
+    const int64_t R0 = itr->total_rex.amount;
+    const int64_t R1 = (uint128_t(S1) * R0) / S0;
+    rex_quantity.amount = R1 - R0;
+    return rex_quantity;
+}
+
+// return amount of EOS that would be returned for proposed sale
+asset token::get_eos_sale_quantity( const asset& rex_quantity ) {
+    auto rexitr = _rexpooltable.begin();
+    const int64_t S0 = rexitr->total_lendable.amount;
+    const int64_t R0 = rexitr->total_rex.amount;
+    const int64_t p  = (uint128_t(rex_quantity.amount) * S0) / R0;
+    asset proceeds( p, symbol("EOS", 4) );
+    return proceeds;
+}
+
+// return amount of REX that would be required to return EOS quantity
+asset token::get_rex_sale_quantity( const asset& eos_quantity ) {
+    auto rexitr = _rexpooltable.begin();
+    const int64_t S0 = rexitr->total_lendable.amount;
+    const int64_t R0 = rexitr->total_rex.amount;
+    asset rex_quantity((uint128_t(eos_quantity.amount) * R0) / S0, symbol("REX", 4));
+    return rex_quantity;
+}
+
+
 void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract)
 {
     require_auth( _self );
@@ -87,6 +120,7 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
 
   if (stake) {
     add_staked_balance( owner, quantity );
+    add_rex_balance( owner, get_rex_purchase_quantity(quantity) );
 
     // buy rex
     action deposit_act(
@@ -182,17 +216,7 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
 
     sub_staked_balance( beneficiary, eos_quantity );
 
-    // todo - check no overflow issue here (in changing EOS to REX)
-
-    // Calculate REX required to return at least the requested quantity of EOS
-    // There may be more EOS returned than needed, in which case the excess will remain in rex system
-    // It should never be less, assuming the EOS/REX rate may only increase
-    // todo - add action to allow any extra EOS to be reinvested in rex by a management script?
-    const auto& rex_pool = _rexpooltable.get( 0, "no rex pool object found" );
-    const uint32_t approx_rex_rate = rex_pool.total_rex.amount / rex_pool.total_lendable.amount;
-    asset rex_quantity = asset(eos_quantity.amount * approx_rex_rate, symbol("REX", 4));
-    print("approx_rex_rate: ", approx_rex_rate, "\n");
-    print("rex_quantity: ", rex_quantity, "\n");
+    asset rex_quantity = get_rex_sale_quantity(eos_quantity);
 
     // check rexbal to see whether there's enough matured_rex to return tokens
     asset matured_rex = get_matured_rex();
@@ -201,6 +225,8 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
     bool empty_unstaking_queue = _unstakingtable.begin() == _unstakingtable.end();
 
     if (empty_unstaking_queue && (matured_rex >= rex_quantity)) {
+
+        sub_rex_balance( beneficiary, rex_quantity );
 
         // sell rex
         action sellrex_act(
@@ -320,6 +346,23 @@ void token::add_staked_balance( const name& owner, const asset& value ){
     });
 }
 
+void token::sub_rex_balance( const name& owner, const asset& value ){
+    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+
+    check( account.rex_balance.amount >= value.amount, "overdrawn locked balance" );
+    _accountstable.modify( account, same_payer, [&]( auto& a ) {
+        a.rex_balance -= value;
+    });
+}
+
+void token::add_rex_balance( const name& owner, const asset& value ){
+    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+
+    _accountstable.modify( account, same_payer, [&]( auto& a ) {
+        a.rex_balance += value;
+    });
+}
+
 void token::sub_unstaking_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
@@ -352,6 +395,7 @@ void token::open( const name& owner, const name& ram_payer )
         a.liquid_balance = asset(0, global.native_token_symbol);
 
         a.staked_balance = asset(0, global.native_token_symbol);
+        a.rex_balance = asset(0, symbol("REX", 4));
         a.stake_weighted_days_last_updated = current_time_point();
         a.stake_weighted_days_owed = 0;
 
@@ -420,17 +464,64 @@ void token::withdraw( const name& owner, const asset& quantity ){
 
 }
 
+void token::claimrewards( const name& owner ) {
+
+    check(global_config.exists(), "contract must be initialized first");
+
+    require_auth( owner );
+
+    // subtract extra REX that isn't covering staked EOS at current price, and add it to claim
+    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+    asset total_rex_eos_equiv = get_eos_sale_quantity(account.rex_balance);
+
+    asset eos_rewards_from_rex = total_rex_eos_equiv - account.staked_balance;
+    print("eos_rewards_from_rex: ", eos_rewards_from_rex, "\n");
+
+    asset rex_to_sell = get_rex_sale_quantity(eos_rewards_from_rex);
+    print("rex_to_sell: ", rex_to_sell, "\n");
+
+    sub_rex_balance( owner, rex_to_sell );
+
+    // sell rex
+    action sellrex_act(
+      permission_level{_self, "active"_n},
+      "eosio"_n, "sellrex"_n,
+      std::make_tuple( _self, rex_to_sell )
+    );
+    sellrex_act.send();
+
+    action withdraw_act(
+      permission_level{_self, "active"_n},
+      "eosio"_n, "withdraw"_n,
+      std::make_tuple( _self, eos_rewards_from_rex )
+    );
+    withdraw_act.send();
+
+    // todo - calc stake_weighted_days, clear it, and add share of voting proxy rewards to claim
+    print("stake_weighted_days_owed: ", account.stake_weighted_days_owed, "\n");
+
+    asset total_eos_quantity = eos_rewards_from_rex;
+
+    auto global = global_config.get();
+    action act(
+      permission_level{_self, "active"_n},
+      global.native_token_contract, "transfer"_n,
+      std::make_tuple(_self, owner, total_eos_quantity, "staking reward" )
+    );
+    act.send();
+
+}
+
 void token::processqueue( const uint64_t count )
 {
+
+    check(global_config.exists(), "contract must be initialized first");
+
     // anyone can call this
 
     const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
     const asset matured_rex = get_matured_rex();
-    print("matured_rex: ", matured_rex, "\n");
-
-    const auto& rex_pool = _rexpooltable.get( 0, "no rex pool object found" );
-    const uint32_t approx_rex_rate = rex_pool.total_rex.amount / rex_pool.total_lendable.amount;
-    print("approx_rex_rate: ", approx_rex_rate, "\n");
+    print("matured_rex: ", matured_rex, "\n\n");
 
     auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
 
@@ -440,12 +531,13 @@ void token::processqueue( const uint64_t count )
         if ( itr != _unstakingtable_by_start.end() ) {
             print("owner: ", itr->owner, "\n");
             asset eos_quantity = itr->quantity;
-            print("eos_quantity: ", eos_quantity, "\n");
-            asset rex_quantity = asset(eos_quantity.amount * approx_rex_rate, symbol("REX", 4));
-            print("rex_quantity: ", rex_quantity, "\n");
+            print("eos_quantity to unstake: ", eos_quantity, "\n");
+            asset rex_quantity = get_rex_sale_quantity(eos_quantity);
+            print("rex_quantity to sell: ", rex_quantity, "\n");
 
             if (matured_rex - rex_to_sell >= rex_quantity) {
                 sub_unstaking_balance(itr->owner, eos_quantity);
+                sub_rex_balance( itr->owner, rex_quantity );
                 add_liquid_balance(itr->owner, eos_quantity);
 
                 action unstaked_act(
@@ -468,7 +560,7 @@ void token::processqueue( const uint64_t count )
     if (rex_to_sell.amount > 0) {
 
         // sell rex
-        asset eos_to_withdraw = asset(rex_to_sell.amount / approx_rex_rate, symbol("EOS", 4));
+        asset eos_to_withdraw = get_eos_sale_quantity(rex_to_sell);
 
         action sellrex_act(
           permission_level{_self, "active"_n},
@@ -519,6 +611,12 @@ void token::unstaked( const name& owner, const asset& quantity ) {
       check(global_config.exists(), "contract must be initialized first");
 
       // if (global_config.exists()) global_config.remove();
+
+      while (_reservestable.begin() != _reservestable.end()) {
+        auto itr = _reservestable.end();
+        itr--;
+        _reservestable.erase(itr);
+      }
 
       while (_accountstable.begin() != _accountstable.end()) {
         auto itr = _accountstable.end();

@@ -47,6 +47,7 @@ namespace eosio {
             asset       liquid_balance;
 
             asset       staked_balance;
+            asset       rex_balance;
             time_point  stake_weighted_days_last_updated;
             uint64_t    stake_weighted_days_owed;
 
@@ -75,6 +76,9 @@ namespace eosio {
          void sub_staked_balance( const name& owner, const asset& value );
          void add_staked_balance( const name& owner, const asset& value );
 
+         void add_rex_balance( const name& owner, const asset& value );
+         void sub_rex_balance( const name& owner, const asset& value );
+
          void sub_unstaking_balance( const name& owner, const asset& value );
          void add_unstaking_balance( const name& owner, const asset& value );
 
@@ -82,6 +86,9 @@ namespace eosio {
          void _unstake( const name& caller, const name& beneficiary, const asset& quantity );
 
          asset get_matured_rex();
+         asset get_rex_purchase_quantity( const asset& eos_quantity );
+         asset get_rex_sale_quantity( const asset& eos_quantity );
+         asset get_eos_sale_quantity( const asset& rex_quantity );
          uint64_t calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated);
       public:
          using contract::contract;
@@ -181,6 +188,11 @@ namespace eosio {
          [[eosio::action]]
          void withdraw(const name& owner, const asset& quantity);
       
+         /**
+          * calculates reward from rex and voting proxy and return liquid tokens to the owners account
+          */
+         [[eosio::action]]
+         void claimrewards(const name& owner);
 
          [[eosio::action]]
          void open( const name& owner, const name& ram_payer );
