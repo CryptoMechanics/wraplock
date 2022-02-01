@@ -220,11 +220,16 @@ namespace eosio {
           */
          #ifdef INCLUDE_TEST_ACTIONS
 
+            asset get_total_rex();
+
             [[eosio::action]]
             void tstunlock( const name& caller, const name& beneficiary, const asset& quantity );
 
             [[eosio::action]]
             void tstunstake( const name& caller, const name& beneficiary, const asset& quantity );
+
+            [[eosio::action]]
+            void debug();
 
          #endif
 

@@ -524,6 +524,7 @@ void token::claimrewards( const name& owner ) {
             a.stake_weighted_days_last_updated = current_time_point();
             a.stake_weighted_days_owed = 0;
         });
+        print("total_stake_weighted_days_owed reset to 0\n");
     }
 
     asset total_eos_quantity = eos_rewards_from_rex + eos_rewards_from_voting_proxy;
@@ -613,6 +614,16 @@ void token::unstaked( const name& owner, const asset& quantity ) {
 
 #ifdef INCLUDE_TEST_ACTIONS
 
+    // return amount of rex immediately available
+    asset token::get_total_rex() {
+        auto& rb = _rexbaltable.get( _self.value, "no rex balance object found" );
+        int64_t matured_rex = rb.matured_rex;
+        for (auto m : rb.rex_maturities) {
+            matured_rex += m.second;
+        }
+        return asset(matured_rex, symbol("REX", 4));
+    }
+
     // test action to unlock without proof
     void token::tstunlock( const name& caller, const name& beneficiary, const asset& quantity ) {
         check(global_config.exists(), "contract must be initialized first");
@@ -625,6 +636,65 @@ void token::unstaked( const name& owner, const asset& quantity ) {
         check(global_config.exists(), "contract must be initialized first");
         require_auth( caller );
         _unstake( caller, beneficiary, quantity );
+    }
+
+    void token::debug() {
+
+        const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
+
+        print("Simulating sales from unstaking queue, pretending all rex has matured...\n\n");
+        asset total_rex_balance = get_total_rex();
+        auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
+        auto itr = _unstakingtable_by_start.begin();
+        while ( itr != _unstakingtable_by_start.end() ) {
+            print("matured_rex_balance: ", total_rex_balance, "\n");
+            print("owner: ", itr->owner, "\n");
+            asset eos_quantity = itr->quantity;
+            print("eos_quantity to unstake: ", eos_quantity, "\n");
+            asset rex_quantity = get_rex_sale_quantity(eos_quantity);
+            print("rex_quantity already sold: ", rex_quantity, "\n");
+            print("Fulfilled!\n\n");
+            itr++;
+        }
+
+        print("\nSimulating sales from staking accounts, pretending all rex has matured...\n\n");
+        auto itra = _accountstable.begin();
+        while ( itra != _accountstable.end() ) {
+            if (itra->staked_balance.amount > 0) {
+                print("matured_rex_balance: ", total_rex_balance, "\n");
+
+                print("owner: ", itra->owner, "\n");
+                asset eos_quantity = itra->staked_balance;
+                print("eos_quantity to unstake: ", eos_quantity, "\n");
+                asset rex_stake_quantity_to_sell = get_rex_sale_quantity(eos_quantity);
+                print("rex_quantity to sell to cover stake: ", rex_stake_quantity_to_sell, "\n");
+                asset eos_raised_from_rex_stake_sale = get_eos_sale_quantity(rex_stake_quantity_to_sell);
+                print("eos_raised_from_rex_stake_sale: ", eos_raised_from_rex_stake_sale, "\n");
+
+                asset rex_reward_quantity_to_sell = itra->rex_balance - rex_stake_quantity_to_sell;
+                print("rex_quantity to sell for EOS reward: ", rex_reward_quantity_to_sell, "\n");
+                asset eos_raised_from_rex_reward_sale = get_eos_sale_quantity(rex_reward_quantity_to_sell);
+                print("eos_raised_from_rex_reward_sale: ", eos_raised_from_rex_reward_sale, "\n");
+
+                asset rex_quantity = rex_stake_quantity_to_sell + rex_reward_quantity_to_sell;
+                print("total rex_quantity to sell: ", rex_quantity, "\n");
+                asset eos_proceeds_quantity = eos_raised_from_rex_stake_sale + eos_raised_from_rex_reward_sale;
+                print("eos_proceeds_quantity: ", eos_proceeds_quantity, "\n");
+
+                if (total_rex_balance >= rex_quantity) {
+                    total_rex_balance -= rex_quantity;
+                    print("Fulfilled ", eos_proceeds_quantity, " of ", eos_quantity, "\n\n");
+                } else {
+                    print("Insufficient rex!\n");
+                    return; // stop at first request that can't be fulfilled
+                }
+            }
+            itra++;
+        }
+
+        print("final matured_rex_balance: ", total_rex_balance, "\n");
+
+
     }
 
 #endif
