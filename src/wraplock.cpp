@@ -87,10 +87,10 @@ void token::accrue_voting_rewards( const name& owner ) {
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
     asset rewards_from_voting_proxy = asset(0, global.native_token_symbol);
-    uint32_t day_start = ((account.voting_rewards_last_accrued.sec_since_epoch() / 86400) * 86400) + 86400;
-    auto itr_i = _historytable.find(day_start);
+    uint32_t day_start_seconds = ((account.voting_rewards_last_accrued.sec_since_epoch() / 86400) * 86400) + 86400;
+    auto itr_i = _historytable.find(day_start_seconds);
     while (itr_i != _historytable.end()) {
-        double reward_share = itr_i->received.amount / itr_i->staked.amount;
+        double reward_share = double(itr_i->voting_rewards_received.amount) / double(itr_i->staked_balance.amount);
         rewards_from_voting_proxy += reward_share * account.staked_balance;
         itr_i++;
     }
@@ -111,7 +111,7 @@ void token::clear_accrued_voting_rewards( const name& owner ) {
     });
 }
 
-void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract)
+void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract, const name& voting_proxy_contract)
 {
     require_auth( _self );
 
@@ -123,10 +123,12 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
     global.paired_chain_id = paired_chain_id;
     global.paired_liquid_wraptoken_contract = paired_liquid_wraptoken_contract;
     global.paired_staked_wraptoken_contract = paired_staked_wraptoken_contract;
+    global.voting_proxy_contract = voting_proxy_contract;
     global_config.set(global, _self);
 
     _reservestable.emplace( _self, [&]( auto& r ){
         r.locked_balance = asset(0, global.native_token_symbol);
+        r.staked_balance = asset(0, global.native_token_symbol);
     });
 }
 
@@ -343,6 +345,7 @@ void token::add_locked_balance( const asset& value ){
 
 void token::sub_staked_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
+    const auto& reserve = _reservestable.get( 0, "no balance object found" );
 
     check( account.staked_balance.amount >= value.amount, "overdrawn staked balance" );
 
@@ -351,14 +354,21 @@ void token::sub_staked_balance( const name& owner, const asset& value ){
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance -= value;
     });
+    _reservestable.modify( reserve, same_payer, [&]( auto& a ) {
+        a.staked_balance -= value;
+    });
 }
 
 void token::add_staked_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
+    const auto& reserve = _reservestable.get( 0, "no balance object found" );
 
     accrue_voting_rewards( owner );
 
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
+        a.staked_balance += value;
+    });
+    _reservestable.modify( reserve, same_payer, [&]( auto& a ) {
         a.staked_balance += value;
     });
 }
@@ -440,6 +450,7 @@ void token::close( const name& owner )
 
 void token::deposit(name from, name to, asset quantity, string memo)
 { 
+    check(global_config.exists(), "contract must be initialized first");
 
     print("transfer ", name{from}, " ",  name{to}, " ", quantity, "\n");
     print("sender: ", get_sender(), "\n");
@@ -449,6 +460,21 @@ void token::deposit(name from, name to, asset quantity, string memo)
 
     //if incoming transfer
     if (from == "eosio.stake"_n) return ; //ignore unstaking transfers
+    else if (from == global.voting_proxy_contract) {
+
+        // add received and current total staked to history table record
+        const auto& reserve = _reservestable.get( 0, "no balance object found" );
+        uint32_t day_start_seconds = (current_time_point().sec_since_epoch() / 86400) * 86400;
+
+        // todo - check doesn't exist nicely rather than failing on emplace
+
+        _historytable.emplace( _self, [&]( auto& h ){
+            h.day = time_point(seconds(day_start_seconds));
+            h.staked_balance = reserve.staked_balance;
+            h.voting_rewards_received = quantity;
+        });
+
+    }
     else if (from == "eosio.rex"_n) {
 
         // todo - check whether anything needs doing when rex rewards are returned
@@ -662,6 +688,10 @@ void token::unstaked( const name& owner, const asset& quantity ) {
                 print("matured_rex_balance: ", total_rex_balance, "\n");
 
                 print("owner: ", itra->owner, "\n");
+
+                accrue_voting_rewards( itra->owner );
+                print("voting_rewards_accrued: ", itra->voting_rewards_accrued, "\n");
+
                 asset eos_quantity = itra->staked_balance;
                 print("eos_quantity to unstake: ", eos_quantity, "\n");
                 asset rex_stake_quantity_to_sell = get_rex_sale_quantity(eos_quantity);

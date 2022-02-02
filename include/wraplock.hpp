@@ -34,18 +34,20 @@ namespace eosio {
             checksum256   paired_chain_id;
             name          paired_liquid_wraptoken_contract;
             name          paired_staked_wraptoken_contract;
+            name          voting_proxy_contract;
          } globalrow;
 
          struct [[eosio::table]] reserve {
             asset       locked_balance;
+            asset       staked_balance;
 
             uint64_t primary_key() const { return 0; }
          };
 
          struct [[eosio::table]] history {
             time_point     day;
-            asset          staked;
-            asset          received;
+            asset          staked_balance;
+            asset          voting_rewards_received;
 
             uint64_t primary_key() const { return day.sec_since_epoch(); }
          };
@@ -166,7 +168,7 @@ namespace eosio {
           * set contract globals (required before use)
           */
          [[eosio::action]]
-         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract);
+         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract, const name& voting_proxy_contract);
 
 
          /**
