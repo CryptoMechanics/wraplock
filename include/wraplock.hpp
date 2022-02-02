@@ -42,14 +42,22 @@ namespace eosio {
             uint64_t primary_key() const { return 0; }
          };
 
+         struct [[eosio::table]] history {
+            time_point     day;
+            asset          staked;
+            asset          received;
+
+            uint64_t primary_key() const { return day.sec_since_epoch(); }
+         };
+
          struct [[eosio::table]] account {
             name        owner;
             asset       liquid_balance;
 
             asset       staked_balance;
             asset       rex_balance;
-            time_point  stake_weighted_days_last_updated;
-            uint64_t    stake_weighted_days_owed;
+            asset       voting_rewards_accrued;
+            time_point  voting_rewards_last_accrued;
 
             asset       unstaking_balance;
 
@@ -89,7 +97,8 @@ namespace eosio {
          asset get_rex_purchase_quantity( const asset& eos_quantity );
          asset get_rex_sale_quantity( const asset& eos_quantity );
          asset get_eos_sale_quantity( const asset& rex_quantity );
-         uint64_t calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated);
+         void accrue_voting_rewards( const name& owner );
+         void clear_accrued_voting_rewards( const name& owner );
       public:
          using contract::contract;
 
@@ -235,13 +244,14 @@ namespace eosio {
 
          #ifdef INCLUDE_CLEAR_ACTION
             [[eosio::action]]
-            void clear(const name extaccount);
+            void clear();
 
          #endif
 
         [[eosio::on_notify("*::transfer")]] void deposit(name from, name to, asset quantity, string memo);
 
          typedef eosio::multi_index< "reserves"_n, reserve > reservestable;
+         typedef eosio::multi_index< "history"_n, history > historytable;
          typedef eosio::multi_index< "accounts"_n, account > accountstable;
 
          typedef eosio::multi_index< "unstaking"_n, unstaking,
@@ -265,6 +275,7 @@ namespace eosio {
          globaltable global_config;
 
          reservestable _reservestable;
+         historytable _historytable;
          accountstable _accountstable;
 
          unstakingtable _unstakingtable;
@@ -278,6 +289,7 @@ namespace eosio {
         contract(receiver, code, ds),
         global_config(_self, _self.value),
         _reservestable(_self, _self.value),
+        _historytable(_self, _self.value),
         _accountstable(_self, _self.value),
         _unstakingtable(_self, _self.value),
         _processedtable(_self, _self.value),

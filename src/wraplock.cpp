@@ -48,13 +48,6 @@ asset token::get_matured_rex() {
     return asset(matured_rex, symbol("REX", 4));
 }
 
-uint64_t token::calculated_owed_stake_weighted_days(const asset& staked_balance, const time_point& stake_weighted_days_last_updated) {
-    uint32_t seconds_since_last_update = current_time_point().sec_since_epoch() - stake_weighted_days_last_updated.sec_since_epoch();
-    uint32_t full_days_since_last_update = seconds_since_last_update / 86400;
-    uint64_t owed = full_days_since_last_update * (staked_balance.amount / 10000);
-    return owed;
-}
-
 // return amount of REX that would be returned for proposed purchase
 asset token::get_rex_purchase_quantity( const asset& eos_quantity ) {
     auto itr = _rexpooltable.begin();
@@ -89,6 +82,34 @@ asset token::get_rex_sale_quantity( const asset& eos_quantity ) {
     return rex_quantity;
 }
 
+void token::accrue_voting_rewards( const name& owner ) {
+    auto global = global_config.get();
+    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+
+    asset rewards_from_voting_proxy = asset(0, global.native_token_symbol);
+    uint32_t day_start = ((account.voting_rewards_last_accrued.sec_since_epoch() / 86400) * 86400) + 86400;
+    auto itr_i = _historytable.find(day_start);
+    while (itr_i != _historytable.end()) {
+        double reward_share = itr_i->received.amount / itr_i->staked.amount;
+        rewards_from_voting_proxy += reward_share * account.staked_balance;
+        itr_i++;
+    }
+
+    _accountstable.modify( account, same_payer, [&]( auto& a ) {
+        a.voting_rewards_accrued += rewards_from_voting_proxy;
+        a.voting_rewards_last_accrued = current_time_point();
+    });
+}
+
+void token::clear_accrued_voting_rewards( const name& owner ) {
+    auto global = global_config.get();
+    const auto& account = _accountstable.get( owner.value, "no balance object found" );
+
+    _accountstable.modify( account, same_payer, [&]( auto& a ) {
+        a.voting_rewards_accrued = asset(0, global.native_token_symbol);
+        a.voting_rewards_last_accrued = current_time_point();
+    });
+}
 
 void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract)
 {
@@ -325,26 +346,20 @@ void token::sub_staked_balance( const name& owner, const asset& value ){
 
     check( account.staked_balance.amount >= value.amount, "overdrawn staked balance" );
 
-    uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
-    print("calculated_owed_stake_weighted_days: ", owed, "\n");
+    accrue_voting_rewards( owner );
 
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance -= value;
-        a.stake_weighted_days_last_updated = current_time_point();
-        a.stake_weighted_days_owed += owed;
     });
 }
 
 void token::add_staked_balance( const name& owner, const asset& value ){
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
-    uint64_t owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
-    print("calculated_owed_stake_weighted_days: ", owed, "\n");
+    accrue_voting_rewards( owner );
 
     _accountstable.modify( account, same_payer, [&]( auto& a ) {
         a.staked_balance += value;
-        a.stake_weighted_days_last_updated = current_time_point();
-        a.stake_weighted_days_owed += owed;
     });
 }
 
@@ -398,8 +413,8 @@ void token::open( const name& owner, const name& ram_payer )
 
         a.staked_balance = asset(0, global.native_token_symbol);
         a.rex_balance = asset(0, symbol("REX", 4));
-        a.stake_weighted_days_last_updated = current_time_point();
-        a.stake_weighted_days_owed = 0;
+        a.voting_rewards_accrued = asset(0, global.native_token_symbol);
+        a.voting_rewards_last_accrued = current_time_point();
 
         a.unstaking_balance = asset(0, global.native_token_symbol);
     });
@@ -416,8 +431,9 @@ void token::close( const name& owner )
    check( it != _accountstable.end(), "Balance row already deleted or never existed. Action won't have any effect." );
    check( it->liquid_balance.amount == 0, "Cannot close because the liquid balance is not zero." );
    check( it->staked_balance.amount == 0, "Cannot close because the staked balance is not zero." );
+   check( it->rex_balance.amount == 0, "Cannot close because the rex balance is not zero." );
+   check( it->voting_rewards_accrued.amount == 0, "Cannot close because the rewards accrued balance is not zero." );
    check( it->unstaking_balance.amount == 0, "Cannot close because the unstaking balance is not zero." );
-   check( it->stake_weighted_days_owed == 0, "Cannot close because the stake_weighted_days balance is not zero." );
    _accountstable.erase( it );
 
 }
@@ -505,39 +521,21 @@ void token::claimrewards( const name& owner ) {
         withdraw_act.send();
     }
 
-    // todo - calc stake_weighted_days, clear it, and add share of voting proxy rewards to claim
-    uint64_t stake_weighted_days_owed = account.stake_weighted_days_owed;
-    print("stake_weighted_days_owed_already: ", stake_weighted_days_owed, "\n");
-    uint64_t extra_owed = calculated_owed_stake_weighted_days(account.staked_balance, account.stake_weighted_days_last_updated);
-    print("extra_stake_weighted_days_owed: ", extra_owed, "\n");
-    stake_weighted_days_owed += extra_owed;
-
-    print("total_stake_weighted_days_owed: ", stake_weighted_days_owed, "\n");
-
-    asset eos_rewards_from_voting_proxy = asset(0, global.native_token_symbol);
-
-    if (stake_weighted_days_owed > 0) {
-
-        // todo - calculate payment for stake_weighted_days_owed, and add to reward
-
-        _accountstable.modify( account, same_payer, [&]( auto& a ) {
-            a.stake_weighted_days_last_updated = current_time_point();
-            a.stake_weighted_days_owed = 0;
-        });
-        print("total_stake_weighted_days_owed reset to 0\n");
+    // move rex rewards to liquid balance
+    if (eos_rewards_from_rex.amount > 0) {
+        add_liquid_balance( owner, eos_rewards_from_rex );
     }
 
-    asset total_eos_quantity = eos_rewards_from_rex + eos_rewards_from_voting_proxy;
+    // update voting rewards if there were any since last staking/unstaking action
+    accrue_voting_rewards( owner );
 
-    check(total_eos_quantity.amount > 0, "no rewards to claim");
+    // move voting accrued voting rewards to liquid balance
+    if (account.voting_rewards_accrued.amount > 0) {
+        add_liquid_balance( owner, account.voting_rewards_accrued );
+        clear_accrued_voting_rewards( owner );
+    }
 
-    action act(
-      permission_level{_self, "active"_n},
-      global.native_token_contract, "transfer"_n,
-      std::make_tuple(_self, owner, total_eos_quantity, "staking reward" )
-    );
-    act.send();
-
+    // todo - add inline notification?
 }
 
 void token::processqueue( const uint64_t count )
@@ -701,7 +699,7 @@ void token::unstaked( const name& owner, const asset& quantity ) {
 
 #ifdef INCLUDE_CLEAR_ACTION
 
-    void token::clear(const name extaccount)
+    void token::clear()
     {
       require_auth( _self );
 
@@ -713,6 +711,12 @@ void token::unstaked( const name& owner, const asset& quantity ) {
         auto itr = _reservestable.end();
         itr--;
         _reservestable.erase(itr);
+      }
+
+      while (_historytable.begin() != _historytable.end()) {
+        auto itr = _historytable.end();
+        itr--;
+        _historytable.erase(itr);
       }
 
       while (_accountstable.begin() != _accountstable.end()) {
