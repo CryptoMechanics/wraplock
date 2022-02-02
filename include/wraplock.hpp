@@ -2,6 +2,9 @@
 #define INCLUDE_CLEAR_ACTION
 #define INCLUDE_TEST_ACTIONS
 
+// constants
+#define DAY_SECONDS 86400
+
 #pragma once
 
 #include <eosio/asset.hpp>
@@ -48,6 +51,9 @@ namespace eosio {
             time_point     day;
             asset          staked_balance;
             asset          voting_rewards_received;
+
+            // todo - keep track of this, so record may be removed when no longer useful
+            // asset          voting_rewards_distributed;
 
             uint64_t primary_key() const { return day.sec_since_epoch(); }
          };

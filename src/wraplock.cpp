@@ -86,8 +86,11 @@ void token::accrue_voting_rewards( const name& owner ) {
     auto global = global_config.get();
     const auto& account = _accountstable.get( owner.value, "no balance object found" );
 
+    uint32_t current_day_start_seconds = (current_time_point().sec_since_epoch() / DAY_SECONDS) * DAY_SECONDS;
+    _historytable.get(current_day_start_seconds, "cannot accrue voting rewards until today's are received");
+
     asset rewards_from_voting_proxy = asset(0, global.native_token_symbol);
-    uint32_t day_start_seconds = ((account.voting_rewards_last_accrued.sec_since_epoch() / 86400) * 86400) + 86400;
+    uint32_t day_start_seconds = ((account.voting_rewards_last_accrued.sec_since_epoch() / DAY_SECONDS) * DAY_SECONDS) + DAY_SECONDS;
     auto itr_i = _historytable.find(day_start_seconds);
     while (itr_i != _historytable.end()) {
         double reward_share = double(itr_i->voting_rewards_received.amount) / double(itr_i->staked_balance.amount);
@@ -462,11 +465,11 @@ void token::deposit(name from, name to, asset quantity, string memo)
     if (from == "eosio.stake"_n) return ; //ignore unstaking transfers
     else if (from == global.voting_proxy_contract) {
 
-        // add received and current total staked to history table record
+        // add voting_rewards_received and current staked_balance to history table record
         const auto& reserve = _reservestable.get( 0, "no balance object found" );
-        uint32_t day_start_seconds = (current_time_point().sec_since_epoch() / 86400) * 86400;
+        uint32_t day_start_seconds = (current_time_point().sec_since_epoch() / DAY_SECONDS) * DAY_SECONDS;
 
-        // todo - check doesn't exist nicely rather than failing on emplace
+        check(_historytable.find(day_start_seconds) == _historytable.end(), "voting rewards already received for today");
 
         _historytable.emplace( _self, [&]( auto& h ){
             h.day = time_point(seconds(day_start_seconds));
