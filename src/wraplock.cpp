@@ -420,18 +420,20 @@ void token::open( const name& owner, const name& ram_payer )
 
    auto global = global_config.get();
 
-    _accountstable.emplace( ram_payer, [&]( auto& a ){
-        a.owner = owner;
-        a.liquid_balance = asset(0, global.native_token_symbol);
+    auto itr = _accountstable.find( owner.value );
+    if( itr == _accountstable.end() ) {
+        _accountstable.emplace( ram_payer, [&]( auto& a ){
+            a.owner = owner;
+            a.liquid_balance = asset(0, global.native_token_symbol);
 
-        a.staked_balance = asset(0, global.native_token_symbol);
-        a.rex_balance = asset(0, symbol("REX", 4));
-        a.voting_rewards_accrued = asset(0, global.native_token_symbol);
-        a.voting_rewards_last_accrued = current_time_point();
+            a.staked_balance = asset(0, global.native_token_symbol);
+            a.rex_balance = asset(0, symbol("REX", 4));
+            a.voting_rewards_accrued = asset(0, global.native_token_symbol);
+            a.voting_rewards_last_accrued = current_time_point();
 
-        a.unstaking_balance = asset(0, global.native_token_symbol);
-    });
-
+            a.unstaking_balance = asset(0, global.native_token_symbol);
+        });
+    }
 }
 
 void token::close( const name& owner )
