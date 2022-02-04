@@ -243,7 +243,7 @@ namespace eosio {
             void tstunstake( const name& caller, const name& beneficiary, const asset& quantity );
 
             [[eosio::action]]
-            void debug();
+            void debug( const bool accrue_rewards );
 
          #endif
 

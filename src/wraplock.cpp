@@ -667,7 +667,7 @@ void token::unstaked( const name& owner, const asset& quantity ) {
         _unstake( caller, beneficiary, quantity );
     }
 
-    void token::debug() {
+    void token::debug( const bool accrue_rewards ) {
 
         const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
 
@@ -694,8 +694,10 @@ void token::unstaked( const name& owner, const asset& quantity ) {
 
                 print("owner: ", itra->owner, "\n");
 
-                accrue_voting_rewards( itra->owner );
-                print("voting_rewards_accrued: ", itra->voting_rewards_accrued, "\n");
+                if (accrue_rewards) {
+                    accrue_voting_rewards( itra->owner );
+                    print("voting_rewards_accrued: ", itra->voting_rewards_accrued, "\n");
+                }
 
                 asset eos_quantity = itra->staked_balance;
                 print("eos_quantity to unstake: ", eos_quantity, "\n");
@@ -726,8 +728,6 @@ void token::unstaked( const name& owner, const asset& quantity ) {
         }
 
         print("final matured_rex_balance: ", total_rex_balance, "\n");
-
-
     }
 
 #endif
