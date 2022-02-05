@@ -91,10 +91,14 @@ void token::accrue_voting_rewards( const name& owner ) {
 
     asset rewards_from_voting_proxy = asset(0, global.native_token_symbol);
     uint32_t day_start_seconds = ((account.voting_rewards_last_accrued.sec_since_epoch() / DAY_SECONDS) * DAY_SECONDS) + DAY_SECONDS;
+    print("day_start_seconds: ", day_start_seconds, "\n");
     auto itr_i = _historytable.find(day_start_seconds);
     while (itr_i != _historytable.end()) {
+        print("day: ", itr_i->day.sec_since_epoch(), "\n");
         double reward_share = double(itr_i->voting_rewards_received.amount) / double(itr_i->staked_balance.amount);
-        rewards_from_voting_proxy += reward_share * account.staked_balance;
+        print("reward_share: ", reward_share, "\n");
+        rewards_from_voting_proxy += asset(static_cast<int64_t>( (double(account.staked_balance.amount) * reward_share)), global.native_token_symbol );
+        print("rewards_from_voting_proxy: ", rewards_from_voting_proxy, "\n");
         itr_i++;
     }
 
