@@ -177,10 +177,15 @@ namespace eosio {
 
          /**
           * called to commit deposited tokens to the interchain transfer process
-          * optionally also stakes the tokens to REX
           */
          [[eosio::action]]
-         void lock(const name& owner, const asset& quantity, const name& beneficiary, const bool stake);
+         void lock(const name& owner,  const asset& quantity, const name& beneficiary);
+
+         /**
+          * called to commit deposited tokens to the interchain transfer process and stakes the tokens to REX
+          */
+         [[eosio::action]]
+         void stake(const name& owner,  const asset& quantity, const name& beneficiary);
 
          /**
           * called to use a proof of retirement of liquid wrapped tokens

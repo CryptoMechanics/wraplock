@@ -145,7 +145,7 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
 }
 
 //locks a token amount in the reserve for an interchain transfer
-void token::lock(const name& owner,  const asset& quantity, const name& beneficiary, const bool stake){
+void token::lock(const name& owner,  const asset& quantity, const name& beneficiary) {
 
   check(global_config.exists(), "contract must be initialized first");
 
@@ -157,33 +157,8 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
 
   sub_liquid_balance( owner, quantity );
 
-  asset xquantity; // for xfer action, to determine wrapped token symbols
-
-  if (stake) {
-    xquantity = asset(xquantity.amount, global.paired_staked_wraptoken_symbol);
-    add_staked_balance( owner, quantity );
-    add_rex_balance( owner, get_rex_purchase_quantity(quantity) );
-
-    // buy rex
-    action deposit_act(
-      permission_level{_self, "active"_n},
-      "eosio"_n, "deposit"_n,
-      std::make_tuple( _self, quantity )
-    );
-    deposit_act.send();
-
-    action buyrex_act(
-      permission_level{_self, "active"_n},
-      "eosio"_n, "buyrex"_n,
-      std::make_tuple( _self, quantity )
-    );
-    buyrex_act.send();
-
-
-  } else {
-    xquantity = asset(xquantity.amount, global.paired_liquid_wraptoken_symbol);
-    add_locked_balance( quantity );
-  }
+  asset xquantity = asset(quantity.amount, global.paired_liquid_wraptoken_symbol);
+  add_locked_balance( quantity );
 
   token::xfer x = {
     .owner = owner,
@@ -200,6 +175,51 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
 
 }
 
+void token::stake(const name& owner,  const asset& quantity, const name& beneficiary) {
+
+  check(global_config.exists(), "contract must be initialized first");
+
+  require_auth(owner);
+
+  check(quantity.amount > 0, "must stake positive quantity");
+
+  auto global = global_config.get();
+
+  sub_liquid_balance( owner, quantity );
+
+  asset xquantity = asset(quantity.amount, global.paired_staked_wraptoken_symbol);
+  add_staked_balance( owner, quantity );
+  add_rex_balance( owner, get_rex_purchase_quantity(quantity) );
+
+  // buy rex
+  action deposit_act(
+    permission_level{_self, "active"_n},
+    "eosio"_n, "deposit"_n,
+    std::make_tuple( _self, quantity )
+  );
+  deposit_act.send();
+
+  action buyrex_act(
+    permission_level{_self, "active"_n},
+    "eosio"_n, "buyrex"_n,
+    std::make_tuple( _self, quantity )
+  );
+  buyrex_act.send();
+
+  token::xfer x = {
+    .owner = owner,
+    .quantity = extended_asset(xquantity, global.native_token_contract),
+    .beneficiary = beneficiary
+  };
+
+  action act(
+    permission_level{_self, "active"_n},
+    _self, "emitxfer"_n,
+    std::make_tuple(x)
+  );
+  act.send();
+
+}
 
 void token::unlock(const name& caller, const checksum256 action_receipt_digest){
 
