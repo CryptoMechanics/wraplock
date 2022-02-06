@@ -36,7 +36,9 @@ namespace eosio {
             symbol        native_token_symbol;
             checksum256   paired_chain_id;
             name          paired_liquid_wraptoken_contract;
+            symbol        paired_liquid_wraptoken_symbol;
             name          paired_staked_wraptoken_contract;
+            symbol        paired_staked_wraptoken_symbol;
             name          voting_proxy_contract;
          } globalrow;
 
@@ -138,7 +140,6 @@ namespace eosio {
            name             owner;
            extended_asset   quantity;
            name             beneficiary;
-           bool             staked;
          };
 
          // for checking for sufficient matured tokens before sellrex
@@ -171,7 +172,7 @@ namespace eosio {
           * set contract globals (required before use)
           */
          [[eosio::action]]
-         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract, const name& voting_proxy_contract);
+         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const symbol& paired_liquid_wraptoken_symbol, const name& paired_staked_wraptoken_contract, const symbol& paired_staked_wraptoken_symbol, const name& voting_proxy_contract);
 
 
          /**

@@ -118,7 +118,7 @@ void token::clear_accrued_voting_rewards( const name& owner ) {
     });
 }
 
-void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const name& paired_staked_wraptoken_contract, const name& voting_proxy_contract)
+void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const symbol& paired_liquid_wraptoken_symbol, const name& paired_staked_wraptoken_contract, const symbol& paired_staked_wraptoken_symbol, const name& voting_proxy_contract)
 {
     require_auth( _self );
 
@@ -129,14 +129,19 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
     global.native_token_symbol = native_token_symbol;
     global.paired_chain_id = paired_chain_id;
     global.paired_liquid_wraptoken_contract = paired_liquid_wraptoken_contract;
+    global.paired_liquid_wraptoken_symbol = paired_liquid_wraptoken_symbol;
     global.paired_staked_wraptoken_contract = paired_staked_wraptoken_contract;
+    global.paired_staked_wraptoken_symbol = paired_staked_wraptoken_symbol;
     global.voting_proxy_contract = voting_proxy_contract;
     global_config.set(global, _self);
 
-    _reservestable.emplace( _self, [&]( auto& r ){
-        r.locked_balance = asset(0, global.native_token_symbol);
-        r.staked_balance = asset(0, global.native_token_symbol);
-    });
+    // add zero balances to reserves if not present
+    if (_reservestable.find( 0 ) == _reservestable.end()) {
+        _reservestable.emplace( _self, [&]( auto& r ){
+            r.locked_balance = asset(0, global.native_token_symbol);
+            r.staked_balance = asset(0, global.native_token_symbol);
+        });
+    }
 }
 
 //locks a token amount in the reserve for an interchain transfer
@@ -148,9 +153,14 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
 
   check(quantity.amount > 0, "must lock positive quantity");
 
+  auto global = global_config.get();
+
   sub_liquid_balance( owner, quantity );
 
+  asset xquantity; // for xfer action, to determine wrapped token symbols
+
   if (stake) {
+    xquantity = asset(xquantity.amount, global.paired_staked_wraptoken_symbol);
     add_staked_balance( owner, quantity );
     add_rex_balance( owner, get_rex_purchase_quantity(quantity) );
 
@@ -171,16 +181,14 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
 
 
   } else {
+    xquantity = asset(xquantity.amount, global.paired_liquid_wraptoken_symbol);
     add_locked_balance( quantity );
   }
 
-  auto global = global_config.get();
-
   token::xfer x = {
     .owner = owner,
-    .quantity = extended_asset(quantity, global.native_token_contract),
-    .beneficiary = beneficiary,
-    .staked = stake
+    .quantity = extended_asset(xquantity, global.native_token_contract),
+    .beneficiary = beneficiary
   };
 
   action act(
@@ -211,7 +219,10 @@ void token::unlock(const name& caller, const checksum256 action_receipt_digest){
 
     check(proof.action.name == "emitxfer"_n, "must provide proof of token retiring before issuing");
 
-    _unlock( redeem_act.beneficiary, redeem_act.quantity.quantity );
+    check(redeem_act.quantity.quantity.symbol == global.paired_liquid_wraptoken_symbol, "incorrect symbol in transfer");
+    asset quantity = asset(redeem_act.quantity.quantity.amount, global.native_token_symbol);
+
+    _unlock( redeem_act.beneficiary, quantity );
 
 }
 
@@ -238,7 +249,10 @@ void token::unstake(const name& caller, const checksum256 action_receipt_digest)
 
     check(proof.action.name == "emitxfer"_n, "must provide proof of token retiring before issuing");
 
-    _unstake( caller, redeem_act.beneficiary, redeem_act.quantity.quantity );
+    check(redeem_act.quantity.quantity.symbol == global.paired_staked_wraptoken_symbol, "incorrect symbol in transfer");
+    asset quantity = asset(redeem_act.quantity.quantity.amount, global.native_token_symbol);
+
+    _unstake( caller, redeem_act.beneficiary, quantity );
 
 }
 
