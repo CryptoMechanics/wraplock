@@ -572,27 +572,28 @@ void token::claimrewards( const name& owner ) {
         asset rex_to_sell = get_rex_sale_quantity(eos_rewards_from_rex);
         print("rex_to_sell: ", rex_to_sell, "\n");
 
-        sub_rex_balance( owner, rex_to_sell );
+        if (get_matured_rex() >= rex_to_sell) {
+            sub_rex_balance( owner, rex_to_sell );
+            add_liquid_balance( owner, eos_rewards_from_rex );
 
-        // sell rex
-        action sellrex_act(
-          permission_level{_self, "active"_n},
-          "eosio"_n, "sellrex"_n,
-          std::make_tuple( _self, rex_to_sell )
-        );
-        sellrex_act.send();
+            // sell rex
+            action sellrex_act(
+              permission_level{_self, "active"_n},
+              "eosio"_n, "sellrex"_n,
+              std::make_tuple( _self, rex_to_sell )
+            );
+            sellrex_act.send();
 
-        action withdraw_act(
-          permission_level{_self, "active"_n},
-          "eosio"_n, "withdraw"_n,
-          std::make_tuple( _self, eos_rewards_from_rex )
-        );
-        withdraw_act.send();
-    }
+            action withdraw_act(
+              permission_level{_self, "active"_n},
+              "eosio"_n, "withdraw"_n,
+              std::make_tuple( _self, eos_rewards_from_rex )
+            );
+            withdraw_act.send();
 
-    // move rex rewards to liquid balance
-    if (eos_rewards_from_rex.amount > 0) {
-        add_liquid_balance( owner, eos_rewards_from_rex );
+        } else {
+            print("insufficient matured rex for sale\n");
+        }
     }
 
     // update voting rewards if there were any since last staking/unstaking action
