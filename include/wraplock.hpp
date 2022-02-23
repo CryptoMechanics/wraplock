@@ -58,8 +58,6 @@ namespace eosio {
             name        owner;
             asset       liquid_balance;
 
-            asset       staked_balance;
-
             asset       unstaking_balance;
 
             uint64_t primary_key() const { return owner.value; }

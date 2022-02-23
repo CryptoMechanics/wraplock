@@ -265,26 +265,16 @@ void token::add_liquid_balance( const name& owner, const asset& value ){
 }
 
 void token::sub_staked_balance( const name& owner, const asset& value ){
-    const auto& account = _accountstable.get( owner.value, "no balance object found" );
     const auto& reserve = _reservestable.get( 0, "no balance object found" );
 
-    check( account.staked_balance.amount >= value.amount, "overdrawn staked balance" );
-
-    _accountstable.modify( account, same_payer, [&]( auto& a ) {
-        a.staked_balance -= value;
-    });
     _reservestable.modify( reserve, same_payer, [&]( auto& a ) {
         a.staked_balance -= value;
     });
 }
 
 void token::add_staked_balance( const name& owner, const asset& value ){
-    const auto& account = _accountstable.get( owner.value, "no balance object found" );
     const auto& reserve = _reservestable.get( 0, "no balance object found" );
 
-    _accountstable.modify( account, same_payer, [&]( auto& a ) {
-        a.staked_balance += value;
-    });
     _reservestable.modify( reserve, same_payer, [&]( auto& a ) {
         a.staked_balance += value;
     });
@@ -323,8 +313,6 @@ void token::open( const name& owner, const name& ram_payer )
             a.owner = owner;
             a.liquid_balance = asset(0, global.native_token_symbol);
 
-            a.staked_balance = asset(0, global.native_token_symbol);
-
             a.unstaking_balance = asset(0, global.native_token_symbol);
         });
     }
@@ -339,7 +327,6 @@ void token::close( const name& owner )
    auto it = _accountstable.find( owner.value );
    check( it != _accountstable.end(), "Balance row already deleted or never existed. Action won't have any effect." );
    check( it->liquid_balance.amount == 0, "Cannot close because the liquid balance is not zero." );
-   check( it->staked_balance.amount == 0, "Cannot close because the staked balance is not zero." );
    check( it->unstaking_balance.amount == 0, "Cannot close because the unstaking balance is not zero." );
    _accountstable.erase( it );
 
