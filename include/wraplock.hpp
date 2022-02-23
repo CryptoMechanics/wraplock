@@ -35,15 +35,12 @@ namespace eosio {
             name          native_token_contract;
             symbol        native_token_symbol;
             checksum256   paired_chain_id;
-            name          paired_liquid_wraptoken_contract;
-            symbol        paired_liquid_wraptoken_symbol;
-            name          paired_staked_wraptoken_contract;
-            symbol        paired_staked_wraptoken_symbol;
+            name          paired_wraptoken_contract;
+            symbol        paired_wraptoken_symbol;
             name          voting_proxy_contract;
          } globalrow;
 
          struct [[eosio::table]] reserve {
-            asset       locked_balance;
             asset       staked_balance;
 
             uint64_t primary_key() const { return 0; }
@@ -62,9 +59,6 @@ namespace eosio {
             asset       liquid_balance;
 
             asset       staked_balance;
-            asset       rex_balance;
-            asset       voting_rewards_accrued;
-            time_point  voting_rewards_last_accrued;
 
             asset       unstaking_balance;
 
@@ -85,27 +79,18 @@ namespace eosio {
          void sub_liquid_balance( const name& owner, const asset& value );
          void add_liquid_balance( const name& owner, const asset& value );
 
-         void sub_locked_balance( const asset& value );
-         void add_locked_balance( const asset& value );
-
          void sub_staked_balance( const name& owner, const asset& value );
          void add_staked_balance( const name& owner, const asset& value );
-
-         void add_rex_balance( const name& owner, const asset& value );
-         void sub_rex_balance( const name& owner, const asset& value );
 
          void sub_unstaking_balance( const name& owner, const asset& value );
          void add_unstaking_balance( const name& owner, const asset& value );
 
-         void _unlock( const name& beneficiary, const asset& quantity );
          void _unstake( const name& caller, const name& beneficiary, const asset& quantity );
 
          asset get_matured_rex();
          asset get_rex_purchase_quantity( const asset& eos_quantity );
          asset get_rex_sale_quantity( const asset& eos_quantity );
          asset get_eos_sale_quantity( const asset& rex_quantity );
-         void accrue_voting_rewards( const name& owner );
-         void clear_accrued_voting_rewards( const name& owner );
       public:
          using contract::contract;
 
@@ -172,27 +157,13 @@ namespace eosio {
           * set contract globals (required before use)
           */
          [[eosio::action]]
-         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_liquid_wraptoken_contract, const symbol& paired_liquid_wraptoken_symbol, const name& paired_staked_wraptoken_contract, const symbol& paired_staked_wraptoken_symbol, const name& voting_proxy_contract);
-
-
-         /**
-          * called to commit deposited tokens to the interchain transfer process
-          */
-         [[eosio::action]]
-         void lock(const name& owner,  const asset& quantity, const name& beneficiary);
+         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract);
 
          /**
           * called to commit deposited tokens to the interchain transfer process and stakes the tokens to REX
           */
          [[eosio::action]]
          void stake(const name& owner,  const asset& quantity, const name& beneficiary);
-
-         /**
-          * called to use a proof of retirement of liquid wrapped tokens
-          * returns locked tokens to the appropiate liquid balance
-          */
-         [[eosio::action]]
-         void unlock(const name& caller, const checksum256 action_receipt_digest);
 
          /**
           * called to use a proof of retirement of staked wrapped tokens
@@ -208,12 +179,6 @@ namespace eosio {
          [[eosio::action]]
          void withdraw(const name& owner, const asset& quantity);
       
-         /**
-          * calculates reward from rex and voting proxy and return liquid tokens to the owners account
-          */
-         [[eosio::action]]
-         void claimrewards(const name& owner);
-
          [[eosio::action]]
          void open( const name& owner, const name& ram_payer );
 
@@ -241,9 +206,6 @@ namespace eosio {
          #ifdef INCLUDE_TEST_ACTIONS
 
             asset get_total_rex();
-
-            [[eosio::action]]
-            void tstunlock( const name& caller, const name& beneficiary, const asset& quantity );
 
             [[eosio::action]]
             void tstunstake( const name& caller, const name& beneficiary, const asset& quantity );
