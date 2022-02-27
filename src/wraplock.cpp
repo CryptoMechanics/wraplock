@@ -82,7 +82,7 @@ asset token::get_rex_sale_quantity( const asset& eos_quantity ) {
     return rex_quantity;
 }
 
-void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract)
+void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract, const name& reward_target_contract)
 {
     require_auth( _self );
 
@@ -95,6 +95,7 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
     global.paired_wraptoken_contract = paired_wraptoken_contract;
     global.paired_wraptoken_symbol = paired_wraptoken_symbol;
     global.voting_proxy_contract = voting_proxy_contract;
+    global.reward_target_contract = reward_target_contract;
     global_config.set(global, _self);
 
     // add zero balances to reserves if not present
@@ -118,7 +119,7 @@ void token::stake(const name& owner,  const asset& quantity, const name& benefic
   sub_liquid_balance( owner, quantity );
 
   asset xquantity = asset(quantity.amount, global.paired_wraptoken_symbol);
-  add_staked_balance( owner, quantity );
+  add_staked_balance( quantity );
 
   // buy rex
   action deposit_act(
@@ -179,7 +180,7 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
 
     asset eos_quantity = quantity;
 
-    sub_staked_balance( beneficiary, eos_quantity );
+    sub_staked_balance( eos_quantity );
 
     asset rex_quantity = get_rex_sale_quantity(eos_quantity);
 
@@ -264,7 +265,7 @@ void token::add_liquid_balance( const name& owner, const asset& value ){
     });
 }
 
-void token::sub_staked_balance( const name& owner, const asset& value ){
+void token::sub_staked_balance( const asset& value ){
     const auto& reserve = _reservestable.get( 0, "no balance object found" );
 
     _reservestable.modify( reserve, same_payer, [&]( auto& a ) {
@@ -272,7 +273,7 @@ void token::sub_staked_balance( const name& owner, const asset& value ){
     });
 }
 
-void token::add_staked_balance( const name& owner, const asset& value ){
+void token::add_staked_balance( const asset& value ){
     const auto& reserve = _reservestable.get( 0, "no balance object found" );
 
     _reservestable.modify( reserve, same_payer, [&]( auto& a ) {
@@ -347,15 +348,62 @@ void token::deposit(name from, name to, asset quantity, string memo)
     else if (from == global.voting_proxy_contract) {
 
         // add voting_rewards_received and current staked_balance to history table record
-        const auto& reserve = _reservestable.get( 0, "no balance object found" );
+        const auto& reserve = _reservestable.get( 0, "no reserve balance object found" );
         uint32_t day_start_seconds = (current_time_point().sec_since_epoch() / DAY_SECONDS) * DAY_SECONDS;
 
         check(_historytable.find(day_start_seconds) == _historytable.end(), "voting rewards already received for today");
 
+        asset original_staked_balance = reserve.staked_balance;
+
+        // account for and allocate the amount from vote rewards to rex (adding to reserve.staked_balance)
+        add_staked_balance( quantity );
+
+        // deposit and buy rex with voting rewards
+        action deposit_act(
+            permission_level{_self, "active"_n},
+            "eosio"_n, "deposit"_n,
+            std::make_tuple( _self, quantity )
+        );
+        deposit_act.send();
+
+        action buyrex_act(
+            permission_level{_self, "active"_n},
+            "eosio"_n, "buyrex"_n,
+            std::make_tuple( _self, quantity )
+        );
+        buyrex_act.send();
+
+        // calculate excess rex which can be used for rewards
+        asset eos_value_of_total_rex = get_eos_sale_quantity(get_total_rex());
+        print("eos_value_of_total_rex:", eos_value_of_total_rex, "\n");
+
+        asset eos_owed_for_rewards = eos_value_of_total_rex - reserve.staked_balance;
+        print("eos_owed_for_rewards:", eos_owed_for_rewards, "\n");
+
+        // account for and allocate the excess eos amount in rex to the reserve.staked_balance
+        add_staked_balance( eos_owed_for_rewards );
+
+        // make xfer to send total rewards across bridge to rewarded account
+        asset xquantity = asset(quantity.amount + eos_owed_for_rewards.amount, global.paired_wraptoken_symbol);
+        token::xfer x = {
+            .owner = _self,
+            .quantity = extended_asset(xquantity, global.native_token_contract),
+            .beneficiary = global.reward_target_contract
+        };
+
+        action act(
+            permission_level{_self, "active"_n},
+            _self, "emitxfer"_n,
+            std::make_tuple(x)
+        );
+        act.send();
+
+        // record instantanious stake and the rewards sent across the bridge
         _historytable.emplace( _self, [&]( auto& h ){
             h.day = time_point(seconds(day_start_seconds));
-            h.staked_balance = reserve.staked_balance;
+            h.staked_balance = original_staked_balance;
             h.voting_rewards_received = quantity;
+            h.rex_rewards_accrued = eos_owed_for_rewards;
         });
 
     }
@@ -525,6 +573,12 @@ void token::unstaked( const name& owner, const asset& quantity ) {
         auto itr = _accountstable.end();
         itr--;
         _accountstable.erase(itr);
+      }
+
+      while (_historytable.begin() != _historytable.end()) {
+        auto itr = _historytable.end();
+        itr--;
+        _historytable.erase(itr);
       }
 
       while (_processedtable.begin() != _processedtable.end()) {

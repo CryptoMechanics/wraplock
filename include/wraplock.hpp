@@ -38,6 +38,7 @@ namespace eosio {
             name          paired_wraptoken_contract;
             symbol        paired_wraptoken_symbol;
             name          voting_proxy_contract;
+            name          reward_target_contract;
          } globalrow;
 
          struct [[eosio::table]] reserve {
@@ -50,6 +51,7 @@ namespace eosio {
             time_point     day;
             asset          staked_balance;
             asset          voting_rewards_received;
+            asset          rex_rewards_accrued;
 
             uint64_t primary_key() const { return day.sec_since_epoch(); }
          };
@@ -77,8 +79,8 @@ namespace eosio {
          void sub_liquid_balance( const name& owner, const asset& value );
          void add_liquid_balance( const name& owner, const asset& value );
 
-         void sub_staked_balance( const name& owner, const asset& value );
-         void add_staked_balance( const name& owner, const asset& value );
+         void sub_staked_balance( const asset& value );
+         void add_staked_balance( const asset& value );
 
          void sub_unstaking_balance( const name& owner, const asset& value );
          void add_unstaking_balance( const name& owner, const asset& value );
@@ -155,7 +157,7 @@ namespace eosio {
           * set contract globals (required before use)
           */
          [[eosio::action]]
-         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract);
+         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract, const name& reward_target_contract);
 
          /**
           * called to commit deposited tokens to the interchain transfer process and stakes the tokens to REX
