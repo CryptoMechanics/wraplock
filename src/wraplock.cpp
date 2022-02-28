@@ -82,7 +82,7 @@ asset token::get_rex_sale_quantity( const asset& eos_quantity ) {
     return rex_quantity;
 }
 
-void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract, const name& reward_target_contract)
+void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract, const name& reward_target_contract, const uint32_t min_unstaking_period_seconds)
 {
     require_auth( _self );
 
@@ -96,6 +96,7 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
     global.paired_wraptoken_symbol = paired_wraptoken_symbol;
     global.voting_proxy_contract = voting_proxy_contract;
     global.reward_target_contract = reward_target_contract;
+    global.min_unstaking_period_seconds = min_unstaking_period_seconds;
     global_config.set(global, _self);
 
     // add zero balances to reserves if not present
@@ -190,53 +191,23 @@ void token::_unstake( const name& caller, const name& beneficiary, const asset& 
 
     bool empty_unstaking_queue = _unstakingtable.begin() == _unstakingtable.end();
 
-    if (empty_unstaking_queue && (matured_rex >= rex_quantity)) {
-
-        // sell rex
-        action sellrex_act(
-          permission_level{_self, "active"_n},
-          "eosio"_n, "sellrex"_n,
-          std::make_tuple( _self, rex_quantity )
-        );
-        sellrex_act.send();
-
-        action withdraw_act(
-          permission_level{_self, "active"_n},
-          "eosio"_n, "withdraw"_n,
-          std::make_tuple( _self, eos_quantity )
-        );
-        withdraw_act.send();
-
-        add_liquid_balance( beneficiary, eos_quantity );
-
-        action unstaked_act(
-            permission_level{_self, "active"_n},
-            _self, "unstaked"_n,
-            std::make_tuple(beneficiary, eos_quantity)
-        );
-        unstaked_act.send();
-
+    // add this to queue of unstaking events or replace existing if request already present
+    // if unstaking more, the single unstaking event may move down the queue
+    auto unstaking_itr = _unstakingtable.find(beneficiary.value);
+    if (unstaking_itr == _unstakingtable.end()){
+        _unstakingtable.emplace( caller, [&]( auto& u ){
+            u.owner = beneficiary;
+            u.quantity = eos_quantity;
+            u.started = current_time_point();
+        });
     } else {
-
-        // add this to queue of unstaking events or replace existing if request already present
-        // if unstaking more, the single unstaking event may move down the queue
-        auto unstaking_itr = _unstakingtable.find(beneficiary.value);
-        if (unstaking_itr == _unstakingtable.end()){
-            _unstakingtable.emplace( caller, [&]( auto& u ){
-                u.owner = beneficiary;
-                u.quantity = eos_quantity;
-                u.started = current_time_point();
-            });
-        } else {
-            _unstakingtable.modify( unstaking_itr, same_payer, [&]( auto& u ) {
-                u.quantity += eos_quantity;
-                u.started = current_time_point();
-            });
-        }
-
-        add_unstaking_balance( beneficiary, eos_quantity );
+        _unstakingtable.modify( unstaking_itr, same_payer, [&]( auto& u ) {
+            u.quantity += eos_quantity;
+            u.started = current_time_point();
+        });
     }
 
+    add_unstaking_balance( beneficiary, eos_quantity );
 }
 
 //emits an xfer receipt to serve as proof in interchain transfers
@@ -444,6 +415,7 @@ void token::processqueue( const uint64_t count )
 {
 
     check(global_config.exists(), "contract must be initialized first");
+    auto global = global_config.get();
 
     // anyone can call this
 
@@ -457,29 +429,33 @@ void token::processqueue( const uint64_t count )
     for (uint64_t i = 0; i < count; i++) {
         auto itr = _unstakingtable_by_start.begin();
         if ( itr != _unstakingtable_by_start.end() ) {
-            print("owner: ", itr->owner, "\n");
-            asset eos_quantity = itr->quantity;
-            print("eos_quantity to unstake: ", eos_quantity, "\n");
-            asset rex_quantity = get_rex_sale_quantity(eos_quantity);
-            print("rex_quantity to sell: ", rex_quantity, "\n");
+            if (current_time_point().sec_since_epoch() - itr->started.sec_since_epoch() > (global.min_unstaking_period_seconds)) {
+                print("owner: ", itr->owner, "\n");
+                asset eos_quantity = itr->quantity;
+                print("eos_quantity to unstake: ", eos_quantity, "\n");
+                asset rex_quantity = get_rex_sale_quantity(eos_quantity);
+                print("rex_quantity to sell: ", rex_quantity, "\n");
 
-            if (matured_rex - rex_to_sell >= rex_quantity) {
-                sub_unstaking_balance(itr->owner, eos_quantity);
-                add_liquid_balance(itr->owner, eos_quantity);
+                if (matured_rex - rex_to_sell >= rex_quantity) {
+                    sub_unstaking_balance(itr->owner, eos_quantity);
+                    add_liquid_balance(itr->owner, eos_quantity);
 
-                action unstaked_act(
-                    permission_level{_self, "active"_n},
-                    _self, "unstaked"_n,
-                    std::make_tuple(itr->owner, eos_quantity)
-                );
-                unstaked_act.send();
+                    action unstaked_act(
+                        permission_level{_self, "active"_n},
+                        _self, "unstaked"_n,
+                        std::make_tuple(itr->owner, eos_quantity)
+                    );
+                    unstaked_act.send();
 
-                rex_to_sell += rex_quantity;
-                _unstakingtable_by_start.erase(itr);
-                print("Fulfilled!\n\n");
+                    rex_to_sell += rex_quantity;
+                    _unstakingtable_by_start.erase(itr);
+                    print("Fulfilled!\n\n");
+                } else {
+                    print("Not Fulfilled!\n");
+                    break; // stop at first request that can't be fulfilled
+                }
             } else {
-                print("Not Fulfilled!\n");
-                break; // stop at first request that can't be fulfilled
+                break;
             }
         }
     }

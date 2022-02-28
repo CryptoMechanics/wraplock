@@ -39,6 +39,7 @@ namespace eosio {
             symbol        paired_wraptoken_symbol;
             name          voting_proxy_contract;
             name          reward_target_contract;
+            uint32_t      min_unstaking_period_seconds;
          } globalrow;
 
          struct [[eosio::table]] reserve {
@@ -157,7 +158,7 @@ namespace eosio {
           * set contract globals (required before use)
           */
          [[eosio::action]]
-         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract, const name& reward_target_contract);
+         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract, const name& reward_target_contract, const uint32_t min_unstaking_period_seconds);
 
          /**
           * called to commit deposited tokens to the interchain transfer process and stakes the tokens to REX
