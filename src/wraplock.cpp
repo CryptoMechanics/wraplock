@@ -326,9 +326,6 @@ void token::deposit(name from, name to, asset quantity, string memo)
 
         asset original_staked_balance = reserve.staked_balance;
 
-        // account for and allocate the amount from vote rewards to rex (adding to reserve.staked_balance)
-        add_staked_balance( quantity );
-
         // deposit and buy rex with voting rewards
         action deposit_act(
             permission_level{_self, "active"_n},
@@ -349,10 +346,16 @@ void token::deposit(name from, name to, asset quantity, string memo)
         print("eos_value_of_total_rex:", eos_value_of_total_rex, "\n");
 
         asset eos_owed_for_rewards = eos_value_of_total_rex - reserve.staked_balance;
+        if (eos_owed_for_rewards.amount < 0) eos_owed_for_rewards.amount = 0; // prevent -0.0001 values
         print("eos_owed_for_rewards:", eos_owed_for_rewards, "\n");
 
-        // account for and allocate the excess eos amount in rex to the reserve.staked_balance
-        add_staked_balance( eos_owed_for_rewards );
+        // account for and allocate the amount from vote rewards to rex (adding to reserve.staked_balance)
+        add_staked_balance( quantity );
+
+        // if positive, account for and allocate the excess eos amount in rex to the reserve.staked_balance
+        if (eos_owed_for_rewards.amount > 0) {
+            add_staked_balance( eos_owed_for_rewards );
+        }
 
         // make xfer to send total rewards across bridge to rewarded account
         asset xquantity = asset(quantity.amount + eos_owed_for_rewards.amount, global.paired_wraptoken_symbol);
