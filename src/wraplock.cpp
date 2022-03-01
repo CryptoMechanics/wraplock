@@ -107,13 +107,13 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
     }
 }
 
-void token::stake(const name& owner,  const asset& quantity, const name& beneficiary) {
+void token::lock(const name& owner,  const asset& quantity, const name& beneficiary) {
 
   check(global_config.exists(), "contract must be initialized first");
 
   require_auth(owner);
 
-  check(quantity.amount > 0, "must stake positive quantity");
+  check(quantity.amount > 0, "must lock positive quantity");
 
   auto global = global_config.get();
 
@@ -152,7 +152,7 @@ void token::stake(const name& owner,  const asset& quantity, const name& benefic
 
 }
 
-void token::unstake(const name& caller, const checksum256 action_receipt_digest){
+void token::unlock(const name& caller, const checksum256 action_receipt_digest){
 
     check(global_config.exists(), "contract must be initialized first");
 
@@ -173,11 +173,11 @@ void token::unstake(const name& caller, const checksum256 action_receipt_digest)
     check(redeem_act.quantity.quantity.symbol == global.paired_wraptoken_symbol, "incorrect symbol in transfer");
     asset quantity = asset(redeem_act.quantity.quantity.amount, global.native_token_symbol);
 
-    _unstake( caller, redeem_act.beneficiary, quantity );
+    _unlock( caller, redeem_act.beneficiary, quantity );
 
 }
 
-void token::_unstake( const name& caller, const name& beneficiary, const asset& quantity ) {
+void token::_unlock( const name& caller, const name& beneficiary, const asset& quantity ) {
 
     asset eos_quantity = quantity;
 
@@ -443,12 +443,12 @@ void token::processqueue( const uint64_t count )
                     sub_unstaking_balance(itr->owner, eos_quantity);
                     add_liquid_balance(itr->owner, eos_quantity);
 
-                    action unstaked_act(
+                    action unlocked_act(
                         permission_level{_self, "active"_n},
-                        _self, "unstaked"_n,
+                        _self, "unlocked"_n,
                         std::make_tuple(itr->owner, eos_quantity)
                     );
-                    unstaked_act.send();
+                    unlocked_act.send();
 
                     rex_to_sell += rex_quantity;
                     _unstakingtable_by_start.erase(itr);
@@ -485,7 +485,7 @@ void token::processqueue( const uint64_t count )
     }
 }
 
-void token::unstaked( const name& owner, const asset& quantity ) {
+void token::unlocked( const name& owner, const asset& quantity ) {
     check(global_config.exists(), "contract must be initialized first");
     require_auth(_self);
 }
@@ -502,11 +502,11 @@ void token::unstaked( const name& owner, const asset& quantity ) {
         return asset(matured_rex, symbol("REX", 4));
     }
 
-    // test action to unstake without proof
-    void token::tstunstake( const name& caller, const name& beneficiary, const asset& quantity ) {
+    // test action to unlock without proof
+    void token::tstunlock( const name& caller, const name& beneficiary, const asset& quantity ) {
         check(global_config.exists(), "contract must be initialized first");
         require_auth( caller );
-        _unstake( caller, beneficiary, quantity );
+        _unlock( caller, beneficiary, quantity );
     }
 
     void token::debug( const bool accrue_rewards ) {

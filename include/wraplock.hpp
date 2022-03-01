@@ -86,7 +86,7 @@ namespace eosio {
          void sub_unstaking_balance( const name& owner, const asset& value );
          void add_unstaking_balance( const name& owner, const asset& value );
 
-         void _unstake( const name& caller, const name& beneficiary, const asset& quantity );
+         void _unlock( const name& caller, const name& beneficiary, const asset& quantity );
 
          asset get_matured_rex();
          asset get_rex_purchase_quantity( const asset& eos_quantity );
@@ -164,7 +164,7 @@ namespace eosio {
           * called to commit deposited tokens to the interchain transfer process and stakes the tokens to REX
           */
          [[eosio::action]]
-         void stake(const name& owner,  const asset& quantity, const name& beneficiary);
+         void lock(const name& owner,  const asset& quantity, const name& beneficiary);
 
          /**
           * called to use a proof of retirement of staked wrapped tokens
@@ -172,7 +172,7 @@ namespace eosio {
           * if insufficient, moves staked tokens to the unstaking balance and adds an unstaking record to the queue
           */
          [[eosio::action]]
-         void unstake(const name& caller, const checksum256 action_receipt_digest);
+         void unlock(const name& caller, const checksum256 action_receipt_digest);
 
          /**
           * transfers liquid tokens to the owners account
@@ -199,7 +199,7 @@ namespace eosio {
          void processqueue( const uint64_t count );
 
          [[eosio::action]]
-         void unstaked( const name& owner, const asset& quantity );
+         void unlocked( const name& owner, const asset& quantity );
 
          /**
           * testing actions to be removed in production
@@ -209,7 +209,7 @@ namespace eosio {
             asset get_total_rex();
 
             [[eosio::action]]
-            void tstunstake( const name& caller, const name& beneficiary, const asset& quantity );
+            void tstunlock( const name& caller, const name& beneficiary, const asset& quantity );
 
             [[eosio::action]]
             void debug( const bool accrue_rewards );
