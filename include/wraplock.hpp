@@ -212,7 +212,7 @@ namespace eosio {
             void tstunlock( const name& caller, const name& beneficiary, const asset& quantity );
 
             [[eosio::action]]
-            void debug( const bool accrue_rewards );
+            void debug();
 
          #endif
 

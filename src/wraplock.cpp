@@ -509,7 +509,7 @@ void token::unlocked( const name& owner, const asset& quantity ) {
         _unlock( caller, beneficiary, quantity );
     }
 
-    void token::debug( const bool accrue_rewards ) {
+    void token::debug() {
 
         const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
 
@@ -527,6 +527,14 @@ void token::unlocked( const name& owner, const asset& quantity ) {
             print("Fulfilled!\n\n");
             itr++;
         }
+
+        // calculate excess rex which can be used for rewards
+        const auto& reserve = _reservestable.get( 0, "no reserve balance object found" );
+        const asset total_rex = get_total_rex();
+        const asset eos_value_of_total_rex = get_eos_sale_quantity(total_rex);
+        print("eos_value_of_total_rex:", eos_value_of_total_rex, "\n");
+        const asset eos_owed_for_rewards = eos_value_of_total_rex - reserve.staked_balance;
+        print("eos_available_for_rewards:", eos_owed_for_rewards, "\n");
 
     }
 
