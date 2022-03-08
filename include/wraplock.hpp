@@ -40,10 +40,14 @@ namespace eosio {
             name          voting_proxy_contract;
             name          reward_target_contract;
             uint32_t      min_unstaking_period_seconds;
+            name          float_account;
+            asset         float_account_target_balance;
          } globalrow;
 
          struct [[eosio::table]] reserve {
+            asset       liquid_balance;
             asset       staked_balance;
+            asset       unstaking_balance;
 
             uint64_t primary_key() const { return 0; }
          };
@@ -158,7 +162,7 @@ namespace eosio {
           * set contract globals (required before use)
           */
          [[eosio::action]]
-         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract, const name& reward_target_contract, const uint32_t min_unstaking_period_seconds);
+         void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const symbol& native_token_symbol, const checksum256& paired_chain_id, const name& paired_wraptoken_contract, const symbol& paired_wraptoken_symbol, const name& voting_proxy_contract, const name& reward_target_contract, const uint32_t min_unstaking_period_seconds, const name& float_account, const asset& float_account_target_balance);
 
          /**
           * called to commit deposited tokens to the interchain transfer process and stakes the tokens to REX
@@ -213,6 +217,9 @@ namespace eosio {
 
             [[eosio::action]]
             void debug();
+
+            [[eosio::action]]
+            void debug2();
 
          #endif
 
