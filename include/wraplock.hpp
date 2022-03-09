@@ -56,6 +56,7 @@ namespace eosio {
             time_point     day;
             asset          staked_balance;
             asset          voting_rewards_received;
+            asset          float_addition;
             asset          rex_rewards_accrued;
 
             uint64_t primary_key() const { return day.sec_since_epoch(); }
@@ -217,9 +218,6 @@ namespace eosio {
 
             [[eosio::action]]
             void debug();
-
-            [[eosio::action]]
-            void debug2();
 
          #endif
 

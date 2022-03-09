@@ -111,6 +111,16 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
             r.unstaking_balance = asset(0, global.native_token_symbol);
         });
     }
+
+    // add zero balance float account if not present
+    if (_accountstable.find( global.float_account.value ) == _accountstable.end()) {
+        _accountstable.emplace( _self, [&]( auto& a ) {
+            a.owner = global.float_account;
+            a.liquid_balance = asset(0, global.native_token_symbol);
+            a.unstaking_balance = asset(0, global.native_token_symbol);
+        });
+    }
+
 }
 
 void token::lock(const name& owner,  const asset& quantity, const name& beneficiary) {
@@ -122,6 +132,8 @@ void token::lock(const name& owner,  const asset& quantity, const name& benefici
   check(quantity.amount > 0, "must lock positive quantity");
 
   auto global = global_config.get();
+
+  // check(owner != global.float_account, "cannot lock using float account"); // todo - uncomment this?
 
   sub_liquid_balance( owner, quantity );
 
@@ -357,12 +369,19 @@ void token::deposit(name from, name to, asset quantity, string memo)
         check(_historytable.find(day_start_seconds) == _historytable.end(), "voting rewards already received for today");
 
         // reduce quantity to add to float if it is under target
+        asset float_addition = asset(0, global.native_token_symbol);
+        asset buy_quantity = asset(quantity.amount, global.native_token_symbol);
+
         const auto& float_account = _accountstable.get( global.float_account.value, "no balance object found for float" );
+        print("original float_account.liquid_balance: ", float_account.liquid_balance, "\n");
         if (float_account.liquid_balance < global.float_account_target_balance) {
-            asset addition = asset(std::min(global.float_account_target_balance.amount - float_account.liquid_balance.amount, float_account.liquid_balance.amount), global.native_token_symbol);
-            add_liquid_balance(global.float_account, addition);
-            quantity -= addition;
+            float_addition = asset(std::min(global.float_account_target_balance.amount - float_account.liquid_balance.amount, float_account.liquid_balance.amount), global.native_token_symbol);
+            print("float_addition: ", float_addition, "\n");
+            add_liquid_balance(global.float_account, float_addition);
+            buy_quantity -= float_addition;
         }
+        print("new float_account.liquid_balance: ", float_account.liquid_balance, "\n");
+        print("buy_quantity: ", buy_quantity, "\n");
 
         asset original_staked_balance = reserve.staked_balance;
 
@@ -370,14 +389,14 @@ void token::deposit(name from, name to, asset quantity, string memo)
         action deposit_act(
             permission_level{_self, "active"_n},
             "eosio"_n, "deposit"_n,
-            std::make_tuple( _self, quantity )
+            std::make_tuple( _self, buy_quantity )
         );
         deposit_act.send();
 
         action buyrex_act(
             permission_level{_self, "active"_n},
             "eosio"_n, "buyrex"_n,
-            std::make_tuple( _self, quantity )
+            std::make_tuple( _self, buy_quantity )
         );
         buyrex_act.send();
 
@@ -390,7 +409,7 @@ void token::deposit(name from, name to, asset quantity, string memo)
         print("eos_owed_for_rewards:", eos_owed_for_rewards, "\n");
 
         // account for and allocate the amount from vote rewards to rex (adding to reserve.staked_balance)
-        add_staked_balance( quantity );
+        add_staked_balance( buy_quantity );
 
         // if positive, account for and allocate the excess eos amount in rex to the reserve.staked_balance
         if (eos_owed_for_rewards.amount > 0) {
@@ -398,7 +417,7 @@ void token::deposit(name from, name to, asset quantity, string memo)
         }
 
         // make xfer to send total rewards across bridge to rewarded account
-        asset xquantity = asset(quantity.amount + eos_owed_for_rewards.amount, global.paired_wraptoken_symbol);
+        asset xquantity = asset(buy_quantity.amount + eos_owed_for_rewards.amount, global.paired_wraptoken_symbol);
         token::xfer x = {
             .owner = _self,
             .quantity = extended_asset(xquantity, global.native_token_contract),
@@ -416,7 +435,8 @@ void token::deposit(name from, name to, asset quantity, string memo)
         _historytable.emplace( _self, [&]( auto& h ){
             h.day = time_point(seconds(day_start_seconds));
             h.staked_balance = original_staked_balance;
-            h.voting_rewards_received = quantity; // excludes amount going to float
+            h.voting_rewards_received = quantity; // equal to buy_quantity + float_addition;
+            h.float_addition = float_addition;
             h.rex_rewards_accrued = eos_owed_for_rewards;
         });
 
@@ -445,6 +465,9 @@ void token::withdraw( const name& owner, const asset& quantity ){
     sub_liquid_balance(owner, quantity);
     
     auto global = global_config.get();
+
+    // check(owner != global.float_account, "cannot withdraw from float account"); // todo - uncomment this?
+
     action act(
       permission_level{_self, "active"_n},
       global.native_token_contract, "transfer"_n,
@@ -482,7 +505,7 @@ void token::processqueue( const uint64_t count )
 
                 if (matured_rex - rex_to_sell >= rex_quantity) {
 
-                    asset eos_returned_quantity = get_eos_sale_quantity(rex_to_sell); // min guaranteed amount returned from sale
+                    asset eos_returned_quantity = get_eos_sale_quantity(rex_quantity); // min guaranteed amount returned from sale
                     print("eos_returned_quantity from rex: ", eos_returned_quantity, "\n");
 
                     sub_unstaking_balance(itr->owner, eos_requested_quantity);
@@ -491,7 +514,7 @@ void token::processqueue( const uint64_t count )
                     // if requested more than rex returns, add 0.0001 from float
                     if (eos_requested_quantity > eos_returned_quantity) {
                         asset diff = eos_requested_quantity - eos_returned_quantity;
-                        check(diff.amount == 1, "unexpectedly high diff");
+                        check(diff.amount == 1, "unexpectedly high diff"); // todo - may need to remove
                         sub_liquid_balance(global.float_account, diff);
                         add_liquid_balance(itr->owner, diff);
                         print("eos_added_from_float_account: ", diff, "\n");
@@ -574,35 +597,6 @@ void token::unlocked( const name& owner, const asset& quantity ) {
     }
 
     void token::debug() {
-
-        const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
-
-        print("Simulating sales from unstaking queue, pretending all rex has matured...\n\n");
-        asset total_rex_balance = get_total_rex();
-        auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
-        auto itr = _unstakingtable_by_start.begin();
-        while ( itr != _unstakingtable_by_start.end() ) {
-            print("matured_rex_balance: ", total_rex_balance, "\n");
-            print("owner: ", itr->owner, "\n");
-            asset eos_quantity = itr->quantity;
-            print("eos_quantity to unstake: ", eos_quantity, "\n");
-            asset rex_quantity = get_rex_sale_quantity(eos_quantity);
-            print("rex_quantity already sold: ", rex_quantity, "\n");
-            print("Fulfilled!\n\n");
-            itr++;
-        }
-
-        // calculate excess rex which can be used for rewards
-        const auto& reserve = _reservestable.get( 0, "no reserve balance object found" );
-        const asset total_rex = get_total_rex();
-        const asset eos_value_of_total_rex = get_eos_sale_quantity(total_rex);
-        print("eos_value_of_total_rex:", eos_value_of_total_rex, "\n");
-        const asset eos_owed_for_rewards = eos_value_of_total_rex - reserve.staked_balance - reserve.unstaking_balance;
-        print("eos_available_for_rewards:", eos_owed_for_rewards, "\n");
-
-    }
-
-    void token::debug2() {
         check(global_config.exists(), "contract must be initialized first");
         auto global = global_config.get();
 
@@ -614,31 +608,34 @@ void token::unlocked( const name& owner, const asset& quantity ) {
 
         auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
 
+        print("Simulating sales from unstaking queue, pretending all rex has matured...\n\n");
         asset rex_to_sell = asset(0, symbol("REX", 4));
         asset eos_to_withdraw = asset(0, global.native_token_symbol);
         auto itr = _unstakingtable_by_start.begin();
         while (itr != _unstakingtable_by_start.end()) {
             if (current_time_point().sec_since_epoch() - itr->started.sec_since_epoch() > (global.min_unstaking_period_seconds)) {
                 print("owner: ", itr->owner, "\n");
-                asset eos_quantity = itr->quantity;
-                print("eos_quantity requested to unstake: ", eos_quantity, "\n");
-                asset rex_quantity = get_rex_sale_quantity(eos_quantity);
+                asset eos_requested_quantity = itr->quantity;
+                print("eos_requested_quantity to unstake from rex: ", eos_requested_quantity, "\n");
+                asset rex_quantity = get_rex_sale_quantity(eos_requested_quantity);
                 print("rex_quantity to sell: ", rex_quantity, "\n");
 
                 if (matured_rex - rex_to_sell >= rex_quantity) {
 
-                    asset eos_returned_quantity = get_eos_sale_quantity(rex_to_sell);
-                    print("eos_quantity actually unstaked: ", eos_returned_quantity, "\n");
+                    asset eos_returned_quantity = get_eos_sale_quantity(rex_quantity); // min guaranteed amount returned from sale
+                    print("eos_returned_quantity from rex: ", eos_returned_quantity, "\n");
 
-                    sub_unstaking_balance(itr->owner, eos_returned_quantity);
-                    add_liquid_balance(itr->owner, eos_returned_quantity);
+                    // sub_unstaking_balance(itr->owner, eos_requested_quantity);
+                    // add_liquid_balance(itr->owner, eos_returned_quantity);
 
-                    action unlocked_act(
-                        permission_level{_self, "active"_n},
-                        _self, "unlocked"_n,
-                        std::make_tuple(itr->owner, eos_returned_quantity)
-                    );
-                    unlocked_act.send();
+                    // if requested more than rex returns, add 0.0001 from float
+                    if (eos_requested_quantity > eos_returned_quantity) {
+                        asset diff = eos_requested_quantity - eos_returned_quantity;
+                        // check(diff.amount == 1, "unexpectedly high diff"); // todo - may need to remove
+                        // sub_liquid_balance(global.float_account, diff);
+                        // add_liquid_balance(itr->owner, diff);
+                        print("eos_added_from_float_account: ", diff, "\n");
+                    }
 
                     rex_to_sell += rex_quantity;
                     eos_to_withdraw += eos_returned_quantity;
@@ -651,10 +648,20 @@ void token::unlocked( const name& owner, const asset& quantity ) {
             } else {
                 break;
             }
+            itr++;
         }
 
-        print("rex_to_sell", rex_to_sell, "\n");
-        print("eos_to_withdraw", eos_to_withdraw, "\n");
+        print("rex_to_sell: ", rex_to_sell, "\n");
+        print("eos_to_withdraw: ", eos_to_withdraw, "\n");
+        print("\n");
+
+        // calculate excess rex which can be used for rewards
+        const auto& reserve = _reservestable.get( 0, "no reserve balance object found" );
+        const asset total_rex = get_total_rex();
+        const asset eos_value_of_total_rex = get_eos_sale_quantity(total_rex);
+        print("eos_value_of_total_rex: ", eos_value_of_total_rex, "\n");
+        const asset eos_owed_for_rewards = eos_value_of_total_rex - reserve.staked_balance - reserve.unstaking_balance;
+        print("eos_available_for_rewards: ", eos_owed_for_rewards, "\n");
 
     }
 
