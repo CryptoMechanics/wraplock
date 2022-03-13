@@ -669,13 +669,13 @@ void token::unlocked( const name& owner, const asset& quantity ) {
 
 #ifdef INCLUDE_CLEAR_ACTION
 
-    void token::clear()
+    void token::clear( const bool full )
     {
       require_auth( _self );
 
       check(global_config.exists(), "contract must be initialized first");
 
-      // if (global_config.exists()) global_config.remove();
+      if (full) global_config.remove();
 
       while (_reservestable.begin() != _reservestable.end()) {
         auto itr = _reservestable.end();

@@ -223,7 +223,7 @@ namespace eosio {
 
          #ifdef INCLUDE_CLEAR_ACTION
             [[eosio::action]]
-            void clear();
+            void clear( const bool full );
 
          #endif
 
