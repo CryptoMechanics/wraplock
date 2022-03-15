@@ -490,6 +490,11 @@ void token::processqueue( const uint64_t count )
     const asset matured_rex = get_matured_rex();
     print("matured_rex: ", matured_rex, "\n\n");
 
+    // check for existing rexfunds balance to use to make up EOS rex return shortfall (before using float account)
+    const auto& rexfund = _rexfundtable.get( _self.value, "no rexfund balance object found" );
+    asset residual_rexfunds = rexfund.balance;
+    print("residual_rexfunds: ", residual_rexfunds, "\n");
+
     auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
 
     asset rex_to_sell = asset(0, symbol("REX", 4));
@@ -510,6 +515,18 @@ void token::processqueue( const uint64_t count )
                     print("eos_returned_quantity from rex: ", eos_returned_quantity, "\n");
 
                     sub_unstaking_balance(itr->owner, eos_requested_quantity);
+
+                    // if requested more than rex returns, add 0.0001 from residual rexfunds if present
+                    if (residual_rexfunds.amount > 0) {
+                        if (eos_requested_quantity > eos_returned_quantity) {
+                            asset diff = eos_requested_quantity - eos_returned_quantity;
+                            check(diff.amount == 1, "unexpectedly high diff"); // todo - may need to remove
+                            residual_rexfunds -= diff;
+                            eos_returned_quantity += diff;
+                            print("eos added from residual rexfunds: ", diff, "\n");
+                        }
+                    }
+
                     add_liquid_balance(itr->owner, eos_returned_quantity);
 
                     // if requested more than rex returns, add 0.0001 from float
@@ -518,7 +535,7 @@ void token::processqueue( const uint64_t count )
                         check(diff.amount == 1, "unexpectedly high diff"); // todo - may need to remove
                         sub_liquid_balance(global.float_account, diff);
                         add_liquid_balance(itr->owner, diff);
-                        print("eos_added_from_float_account: ", diff, "\n");
+                        print("eos added from float account: ", diff, "\n");
                     }
 
                     action unlocked_act(
@@ -544,10 +561,6 @@ void token::processqueue( const uint64_t count )
     }
 
     if (rex_to_sell.amount > 0) {
-
-        // todo - because the rex_to_sell may sometimes yield more than the eos_to_withdraw, there is currently an accumulation of
-        // EOS in the rexfund table. This should probably be checked and if positive, used to buyrex each time the rewards transfer
-        // happens. This will mean adding the struct for the rexfunds table to .hpp etc.
 
         action sellrex_act(
           permission_level{_self, "active"_n},
@@ -598,7 +611,12 @@ void token::unlocked( const name& owner, const asset& quantity ) {
 
         const auto& rex_balance = _rexbaltable.get( _self.value, "no rex balance object found" );
         const asset matured_rex = get_total_rex();
-        print("matured_rex: ", matured_rex, "\n\n");
+        print("matured_rex: ", matured_rex, "\n");
+
+        // check for existing rexfunds balance to use to make up EOS rex return shortfall (before using float account)
+        const auto& rexfund = _rexfundtable.get( _self.value, "no rexfund balance object found" );
+        asset residual_rexfunds = rexfund.balance;
+        print("residual_rexfunds: ", residual_rexfunds, "\n\n");
 
         auto _unstakingtable_by_start = _unstakingtable.get_index<"started"_n>();
 
@@ -621,6 +639,17 @@ void token::unlocked( const name& owner, const asset& quantity ) {
 
                     // sub_unstaking_balance(itr->owner, eos_requested_quantity);
                     // add_liquid_balance(itr->owner, eos_returned_quantity);
+
+                    // if requested more than rex returns, add 0.0001 from residual rexfunds if present
+                    if (residual_rexfunds.amount > 0) {
+                        if (eos_requested_quantity > eos_returned_quantity) {
+                            asset diff = eos_requested_quantity - eos_returned_quantity;
+                            check(diff.amount == 1, "unexpectedly high diff"); // todo - may need to remove
+                            residual_rexfunds -= diff;
+                            eos_returned_quantity += diff;
+                            print("eos added from residual rexfunds: ", diff, "\n");
+                        }
+                    }
 
                     // if requested more than rex returns, add 0.0001 from float
                     if (eos_requested_quantity > eos_returned_quantity) {
