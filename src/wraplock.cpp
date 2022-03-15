@@ -357,6 +357,7 @@ void token::deposit(name from, name to, asset quantity, string memo)
     
     auto global = global_config.get();
     check(get_sender() == global.native_token_contract, "transfer not permitted from unauthorised token contract");
+    check(quantity.symbol == global.native_token_symbol, "transfer must be of core token symbol");
 
     //if incoming transfer
     if (from == "eosio.stake"_n) return ; //ignore unstaking transfers
@@ -523,7 +524,7 @@ void token::processqueue( const uint64_t count )
                     action unlocked_act(
                         permission_level{_self, "active"_n},
                         _self, "unlocked"_n,
-                        std::make_tuple(itr->owner, eos_returned_quantity)
+                        std::make_tuple(itr->owner, eos_requested_quantity)
                     );
                     unlocked_act.send();
 
@@ -544,16 +545,9 @@ void token::processqueue( const uint64_t count )
 
     if (rex_to_sell.amount > 0) {
 
-        // sell rex
-        // todo - fix/handle issue with withdraw not matching sellrex quantity
-        //      - sellrex may return more to rexfund table than withdraw removes
-        //      - consequence is that liquid_balance in reserve table may exceed the contracts core token balance until
-        //      - extra from rexfund is withdrawn, or used to buyrex
-
-        // under current implementation, users may never be able to withdraw
-
-        // previously this approach seemingly doesn't equate due to sellrex calling other rex update code
-        // asset eos_to_withdraw = get_eos_sale_quantity(rex_to_sell);
+        // todo - because the rex_to_sell may sometimes yield more than the eos_to_withdraw, there is currently an accumulation of
+        // EOS in the rexfund table. This should probably be checked and if positive, used to buyrex each time the rewards transfer
+        // happens. This will mean adding the struct for the rexfunds table to .hpp etc.
 
         action sellrex_act(
           permission_level{_self, "active"_n},
