@@ -3,34 +3,18 @@
 namespace eosio {
 
 
-//fetches proof from the bridge contract
-token::validproof token::get_proof(const checksum256 action_receipt_digest){
-
-  auto global = global_config.get();
-
-  proofstable _proofstable(global.bridge_contract, global.bridge_contract.value);
-  auto pid_index = _proofstable.get_index<"digest"_n>();
-  auto p_itr = pid_index.find(action_receipt_digest);
-
-  check(p_itr != pid_index.end(), "proof not found");
-
-  return *p_itr;
-
-}
-
-
 //adds a proof to the list of processed proofs (throws an exception if proof already exists)
-void token::add_or_assert(const validproof& proof, const name& payer){
+void token::add_or_assert(const checksum256 receipt_digest, const name& payer){
 
     auto pid_index = _processedtable.get_index<"digest"_n>();
 
-    auto p_itr = pid_index.find(proof.receipt_digest);
+    auto p_itr = pid_index.find(receipt_digest);
 
     check(p_itr == pid_index.end(), "action already proved");
 
     _processedtable.emplace( payer, [&]( auto& s ) {
         s.id = _processedtable.available_primary_key();
-        s.receipt_digest = proof.receipt_digest;
+        s.receipt_digest = receipt_digest;
     });
 
 }
@@ -194,23 +178,31 @@ void token::deposit(name from, name to, asset quantity, string memo)
 }
 
 //withdraw tokens (requires a proof of redemption)
-void token::withdraw(const name& caller, const checksum256 action_receipt_digest){
+void token::withdraw(const name& caller, const bridge::heavyproof heavyproof, const bridge::actionproof actionproof){
+
+    require_auth(caller);
 
     check(global_config.exists(), "contract must be initialized first");
-
-    require_auth( caller );
-
-    token::validproof proof = get_proof(action_receipt_digest);
-
-    token::xfer redeem_act = unpack<token::xfer>(proof.action.data);
-
     auto global = global_config.get();
-    check(proof.chain_id == global.paired_chain_id, "proof chain does not match paired chain");
-    check(proof.action.account == global.paired_wraptoken_contract, "proof account does not match paired account");
-   
-    add_or_assert(proof, caller);
 
-    check(proof.action.name == "emitxfer"_n, "must provide proof of token retiring before issuing");
+    // check proof against bridge
+    // will fail tx if prove is invalid
+    action checkproof_act(
+      permission_level{_self, "active"_n},
+      global.bridge_contract, "checkproofb"_n,
+      std::make_tuple(caller, heavyproof, actionproof)
+    );
+    checkproof_act.send();
+
+    token::xfer redeem_act = unpack<token::xfer>(actionproof.action.data);
+
+    check(heavyproof.chain_id == global.paired_chain_id, "proof chain does not match paired chain");
+
+    check(actionproof.action.account == global.paired_wraptoken_contract, "proof account does not match paired account");
+   
+    add_or_assert(actionproof.receipt.act_digest, caller);
+
+    check(actionproof.action.name == "emitxfer"_n, "must provide proof of token retiring before withdrawing");
 
     sub_reserve(redeem_act.quantity.quantity);
     
