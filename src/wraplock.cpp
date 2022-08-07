@@ -4,17 +4,22 @@ namespace eosio {
 
 
 //adds a proof to the list of processed proofs (throws an exception if proof already exists)
-void token::add_or_assert(const checksum256 receipt_digest, const name& payer){
+void token::add_or_assert(const bridge::actionproof& actionproof, const name& payer){
 
     auto pid_index = _processedtable.get_index<"digest"_n>();
 
-    auto p_itr = pid_index.find(receipt_digest);
+    std::vector<char> serializedAction = pack(actionproof.action);
+    std::vector<char> serializedReceipt = pack(actionproof.receipt);
+    checksum256 action_digest = sha256(serializedAction.data(), serializedAction.size());
+    checksum256 action_receipt_digest = sha256(serializedReceipt.data(), serializedReceipt.size());
+
+    auto p_itr = pid_index.find(action_receipt_digest);
 
     check(p_itr == pid_index.end(), "action already proved");
 
     _processedtable.emplace( payer, [&]( auto& s ) {
         s.id = _processedtable.available_primary_key();
-        s.receipt_digest = receipt_digest;
+        s.receipt_digest = action_receipt_digest;
     });
 
 }
@@ -200,7 +205,7 @@ void token::withdraw(const name& caller, const bridge::heavyproof heavyproof, co
 
     check(actionproof.action.account == global.paired_wraptoken_contract, "proof account does not match paired account");
    
-    add_or_assert(actionproof.receipt.act_digest, caller);
+    add_or_assert(actionproof, caller);
 
     check(actionproof.action.name == "emitxfer"_n, "must provide proof of token retiring before withdrawing");
 

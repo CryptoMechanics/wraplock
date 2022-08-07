@@ -103,7 +103,7 @@ namespace eosio {
 
          using globaltable = eosio::singleton<"global"_n, global>;
 
-         void add_or_assert(const checksum256 receipt_digest, const name& prover);
+         void add_or_assert(const bridge::actionproof& actionproof, const name& payer);
 
          globaltable global_config;
 
