@@ -183,9 +183,9 @@ void token::deposit(name from, name to, asset quantity, string memo)
 }
 
 //withdraw tokens (requires a proof of redemption)
-void token::withdraw(const name& caller, const bridge::heavyproof heavyproof, const bridge::actionproof actionproof){
+void token::withdraw(const name& prover, const bridge::heavyproof blockproof, const bridge::actionproof actionproof){
 
-    require_auth(caller);
+    require_auth(prover);
 
     check(global_config.exists(), "contract must be initialized first");
     auto global = global_config.get();
@@ -195,17 +195,17 @@ void token::withdraw(const name& caller, const bridge::heavyproof heavyproof, co
     action checkproof_act(
       permission_level{_self, "active"_n},
       global.bridge_contract, "checkproofb"_n,
-      std::make_tuple(heavyproof, actionproof)
+      std::make_tuple(blockproof, actionproof)
     );
     checkproof_act.send();
 
     token::xfer redeem_act = unpack<token::xfer>(actionproof.action.data);
 
-    check(heavyproof.chain_id == global.paired_chain_id, "proof chain does not match paired chain");
+    check(blockproof.chain_id == global.paired_chain_id, "proof chain does not match paired chain");
 
     check(actionproof.action.account == global.paired_wraptoken_contract, "proof account does not match paired account");
    
-    add_or_assert(actionproof, caller);
+    add_or_assert(actionproof, prover);
 
     check(actionproof.action.name == "emitxfer"_n, "must provide proof of token retiring before withdrawing");
 
