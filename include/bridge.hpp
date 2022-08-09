@@ -203,20 +203,6 @@ CONTRACT bridge : public contract {
 
 		};
 
-/*		TABLE validproof {
-
-			uint64_t												id;
-			action 													action;
-			checksum256											chain_id;
-			checksum256 										receipt_digest;
-			name 											  		prover;
-
-     		uint64_t primary_key()const { return id; }
-     		checksum256 by_digest()const { return receipt_digest; }
-
-			EOSLIB_SERIALIZE( validproof, (id)(action)(chain_id)(receipt_digest)(prover))
-
-		};*/
 
 		// unscoped, stores readable name and chain id for supported chains
 		TABLE chain {
@@ -234,22 +220,25 @@ CONTRACT bridge : public contract {
 		// scoped by readable chain name
 		TABLE chainschedule {
 
-			uint64_t id;
-			schedule producer_schedule;
-			checksum256 hash;
-			uint64_t last_block;
+			uint64_t			version;
+			schedule 		producer_schedule;
+			checksum256 	hash;
+			uint32_t 		first_block;
+			uint32_t 		last_block;
+			time_point 		expiry;
 
-			uint64_t primary_key()const { return id; }
+			uint64_t primary_key()const { return version; }
+			uint64_t by_expiry()const { return expiry.sec_since_epoch(); }
 
-			EOSLIB_SERIALIZE( chainschedule, (id)(producer_schedule)(hash)(last_block) )
+			EOSLIB_SERIALIZE( chainschedule, (version)(producer_schedule)(hash)(first_block)(last_block)(expiry) )
 
 		};
 
+		//scoped by readable chain name
 		TABLE lastproof {
 
 			uint64_t 		id;
 
-			checksum256		chain_id;
 			uint32_t 		block_height;
 			
 			checksum256 	block_merkle_root;
@@ -257,12 +246,11 @@ CONTRACT bridge : public contract {
 			time_point 		expiry;
 
 			uint64_t primary_key()const { return id; }
-			checksum256 by_chain_id()const { return chain_id; }
 			uint64_t by_block_height()const { return block_height; }
 			checksum256 by_merkle_root()const { return block_merkle_root; }
 			uint64_t by_expiry()const { return expiry.sec_since_epoch(); }
 
-			EOSLIB_SERIALIZE( lastproof, (id)(chain_id)(block_height)(block_merkle_root)(expiry) )
+			EOSLIB_SERIALIZE( lastproof, (id)(block_height)(block_merkle_root)(expiry) )
 
 		};
 		
@@ -270,44 +258,47 @@ CONTRACT bridge : public contract {
 	    typedef eosio::multi_index< "chains"_n, chain,
 	    		indexed_by<"chainid"_n, const_mem_fun<chain, checksum256, &chain::by_chain_id>>> chainstable;
 
-	    typedef eosio::multi_index< "schedules"_n, chainschedule> chainschedulestable;
+	    typedef eosio::multi_index< "schedules"_n, chainschedule,
+            indexed_by<"expiry"_n, const_mem_fun<chainschedule, uint64_t, &chainschedule::by_expiry>>> chainschedulestable;
 
 /*	    typedef eosio::multi_index< "proofs"_n, validproof,
             indexed_by<"digest"_n, const_mem_fun<validproof, checksum256, &validproof::by_digest>>> proofstable;*/
 
 	    typedef eosio::multi_index< "lastproofs"_n, lastproof,
-            indexed_by<"chainid"_n, const_mem_fun<lastproof, checksum256, &lastproof::by_chain_id>>,
             indexed_by<"height"_n, const_mem_fun<lastproof, uint64_t, &lastproof::by_block_height>>,
             indexed_by<"merkleroot"_n, const_mem_fun<lastproof, checksum256, &lastproof::by_merkle_root>>,
             indexed_by<"expiry"_n, const_mem_fun<lastproof, uint64_t, &lastproof::by_expiry>>> proofstable;
 
       chainstable _chainstable;
-   	proofstable _proofstable;
 
 	    bridge( name receiver, name code, datastream<const char*> ds ) :
 	    contract(receiver, code, ds),
-	    _chainstable(receiver, receiver.value),
-	    _proofstable(receiver, receiver.value)
+	    _chainstable(receiver, receiver.value)
 	    {
-	    
+	 
 	    }
 
       ACTION init(name chain_name, checksum256 chain_id, schedule initial_schedule );
 
       //Two different proving schemes are available.
 
-      ACTION checkproofa(name prover, heavyproof blockproof);
-      ACTION checkproofb(name prover, heavyproof blockproof, actionproof actionproof);
-      ACTION checkproofc(name prover, lightproof blockproof, actionproof actionproof); 
+      ACTION checkproofa(heavyproof blockproof);
+      ACTION checkproofb(heavyproof blockproof, actionproof actionproof);
+      ACTION checkproofc(lightproof blockproof, actionproof actionproof); 
       
+      ACTION test(int i);
+
       ACTION clear();
 
-		void gc_proofs(int count);
+		void gc_proofs(name chain, int count);
+		void gc_schedules(name chain, int count);
 
 		bool checkblockproof(heavyproof blockproof);
 		bool checkactionproof(heavyproof blockproof, actionproof actionproof);
 
-		void add_proven_root(checksum256 chain_id, uint32_t block_num, checksum256 root);
-		checksum256 get_proven_root();
+		void add_proven_root(name chain, uint32_t block_num, checksum256 root);
+		checksum256 get_proven_root(name chain);
+
+		name get_chain_name(checksum256 chain_id);
 
 };
