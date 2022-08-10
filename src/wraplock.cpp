@@ -182,13 +182,36 @@ void token::deposit(name from, name to, asset quantity, string memo)
 
 }
 
-//withdraw tokens (requires a proof of redemption)
-void token::withdraw(const name& prover, const bridge::heavyproof blockproof, const bridge::actionproof actionproof){
+void token::_withdraw(const name& prover, const bridge::actionproof actionproof){
+    auto global = global_config.get();
 
+    token::xfer redeem_act = unpack<token::xfer>(actionproof.action.data);
+
+    check(actionproof.action.account == global.paired_wraptoken_contract, "proof account does not match paired account");
+
+    add_or_assert(actionproof, prover);
+
+    check(actionproof.action.name == "emitxfer"_n, "must provide proof of token retiring before withdrawing");
+
+    sub_reserve(redeem_act.quantity.quantity);
+
+    action act(
+      permission_level{_self, "active"_n},
+      redeem_act.quantity.contract, "transfer"_n,
+      std::make_tuple(_self, redeem_act.beneficiary, redeem_act.quantity.quantity, ""_n )
+    );
+    act.send();
+
+}
+
+// withdraw tokens (requires a heavy proof of redemption)
+void token::withdrawa(const name& prover, const bridge::heavyproof blockproof, const bridge::actionproof actionproof){
     require_auth(prover);
 
     check(global_config.exists(), "contract must be initialized first");
     auto global = global_config.get();
+
+    check(blockproof.chain_id == global.paired_chain_id, "proof chain does not match paired chain");
 
     // check proof against bridge
     // will fail tx if prove is invalid
@@ -199,25 +222,28 @@ void token::withdraw(const name& prover, const bridge::heavyproof blockproof, co
     );
     checkproof_act.send();
 
-    token::xfer redeem_act = unpack<token::xfer>(actionproof.action.data);
+    _withdraw(prover, actionproof);
+}
+
+// withdraw tokens (requires a light proof of redemption)
+void token::withdrawb(const name& prover, const bridge::lightproof blockproof, const bridge::actionproof actionproof){
+    require_auth(prover);
+
+    check(global_config.exists(), "contract must be initialized first");
+    auto global = global_config.get();
 
     check(blockproof.chain_id == global.paired_chain_id, "proof chain does not match paired chain");
 
-    check(actionproof.action.account == global.paired_wraptoken_contract, "proof account does not match paired account");
-   
-    add_or_assert(actionproof, prover);
-
-    check(actionproof.action.name == "emitxfer"_n, "must provide proof of token retiring before withdrawing");
-
-    sub_reserve(redeem_act.quantity.quantity);
-    
-    action act(
+    // check proof against bridge
+    // will fail tx if prove is invalid
+    action checkproof_act(
       permission_level{_self, "active"_n},
-      redeem_act.quantity.contract, "transfer"_n,
-      std::make_tuple(_self, redeem_act.beneficiary, redeem_act.quantity.quantity, ""_n )
+      global.bridge_contract, "checkproofc"_n,
+      std::make_tuple(blockproof, actionproof)
     );
-    act.send();
+    checkproof_act.send();
 
+    _withdraw(prover, actionproof);
 }
 
 void token::clear(const name extaccount)
