@@ -49,8 +49,6 @@ void token::emitxfer(const token::xfer& xfer){
 
 void token::sub_reserve( const asset& value ){
 
-   //reserves res_acnts( get_self(), _self.value );
-
    const auto& res = _reservestable.get( value.symbol.code().raw(), "no balance object found" );
    check( res.balance.amount >= value.amount, "overdrawn balance" );
 
@@ -60,8 +58,6 @@ void token::sub_reserve( const asset& value ){
 }
 
 void token::add_reserve(const asset& value){
-
-   //reserves res_acnts( get_self(), _self.value );
 
    auto res = _reservestable.find( value.symbol.code().raw() );
    if( res == _reservestable.end() ) {
@@ -76,6 +72,7 @@ void token::add_reserve(const asset& value){
 
 }
 
+// called on transfer action to lock tokens and initiate interchain transfer
 void token::deposit(name from, name to, asset quantity, string memo)
 { 
 
@@ -90,9 +87,7 @@ void token::deposit(name from, name to, asset quantity, string memo)
     if (from == "eosio.stake"_n) return ; //ignore unstaking transfers
     else if (to == get_self() && from != get_self()){
       //ignore outbound transfers from this contract, as well as inbound transfers of tokens internal to this contract
-      //otherwise, means it's a deposit of external token from user
-
-      // locks a token amount in the reserve for an interchain transfer
+      //otherwise, locks the tokens in the reserve and calls emitxfer to be used for issue/cancel proof
 
       check(quantity.amount > 0, "must lock positive quantity");
 
@@ -139,7 +134,7 @@ void token::_withdraw(const name& prover, const bridge::actionproof actionproof)
 
 }
 
-// withdraw tokens (requires a heavy proof of redemption)
+// withdraw tokens (requires a heavy proof of retiring)
 void token::withdrawa(const name& prover, const bridge::heavyproof blockproof, const bridge::actionproof actionproof){
     require_auth(prover);
 
@@ -160,7 +155,7 @@ void token::withdrawa(const name& prover, const bridge::heavyproof blockproof, c
     _withdraw(prover, actionproof);
 }
 
-// withdraw tokens (requires a light proof of redemption)
+// withdraw tokens (requires a light proof of retiring)
 void token::withdrawb(const name& prover, const bridge::lightproof blockproof, const bridge::actionproof actionproof){
     require_auth(prover);
 
