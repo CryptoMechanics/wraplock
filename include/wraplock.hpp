@@ -19,11 +19,13 @@ namespace eosio {
    class [[eosio::contract("wraplock")]] token : public contract {
       private:
 
-        struct st_create {
-          name          issuer;
-          asset         maximum_supply;
-        };
+         struct st_create {
+            name          issuer;
+            asset         maximum_supply;
+         };
 
+
+         // See `init` action for documentation.
          struct [[eosio::table]] global {
             checksum256   chain_id;
             name          bridge_contract;
@@ -32,7 +34,8 @@ namespace eosio {
             name          paired_wraptoken_contract;
          } globalrow;
 
-         struct [[eosio::table]] extaccount {
+         // structure used for reserve account balances
+         struct [[eosio::table]] account {
             asset    balance;
 
             uint64_t primary_key()const { return balance.symbol.code().raw(); }
@@ -45,6 +48,7 @@ namespace eosio {
       public:
          using contract::contract;
 
+         // structure used for retaining action receipt digests of accepted proven actions, to prevent replay attacks
          struct [[eosio::table]] processed {
 
            uint64_t                        id;
@@ -57,6 +61,7 @@ namespace eosio {
 
          };
 
+         // structure used for the `emitxfer` action used in proof on destination chain
          struct [[eosio::table]] xfer {
            name             owner;
            extended_asset   quantity;
@@ -64,30 +69,68 @@ namespace eosio {
          };
 
 
+         /**
+          * Allows contract account to set which chains and associated contracts are used for all interchain transfers.
+          *
+          * @param chain_id - the id of the chain running this contract
+          * @param bridge_contract - the bridge contract on this chain
+          * @param native_token_contract - the token contract on this chain being enabled for interchain transfers
+          * @param paired_chain_id - the id of the destination chain hosting the wrapped tokens
+          * @param paired_wraptoken_contract - the wraptoken contract on the the destination chain
+          */
          [[eosio::action]]
          void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_wraptoken_contract);
 
 
          void _withdraw(const name& prover, const bridge::actionproof actionproof);
 
+         /**
+          * Allows `prover` account to redeem native tokens and send them to the beneficiary indentified in the `actionproof`.
+          *
+          * @param prover - the calling account whose ram is used for storing the action receipt digest to prevent replay attacks
+          * @param blockproof - the heavy proof data structure
+          * @param actionproof - the proof structure for the `emitxfer` action associated with the `retire` action on the wrapped tokens chain
+          */
          [[eosio::action]]
          void withdrawa(const name& prover, const bridge::heavyproof blockproof, const bridge::actionproof actionproof);
 
+         /**
+          * Allows `prover` account to redeem native tokens and send them to the beneficiary indentified in the `actionproof`.
+          *
+          * @param prover - the calling account whose ram is used for storing the action receipt digest to prevent replay attacks
+          * @param blockproof - the light proof data structure
+          * @param actionproof - the proof structure for the `emitxfer` action associated with the `retire` action on the wrapped tokens chain
+          */
          [[eosio::action]]
          void withdrawb(const name& prover, const bridge::lightproof blockproof, const bridge::actionproof actionproof);
       
-
+         /**
+          * The inline action created by this contract when tokens are locked. Proof of this action is used on the destination chain.
+          */
          [[eosio::action]]
          void emitxfer(const token::xfer& xfer);
 
 
+         /**
+          * Allows contract account to clear existing state except which chains and associated contracts are used.
+          */
          [[eosio::action]]
          void clear();
 
-        [[eosio::on_notify("*::transfer")]] void deposit(name from, name to, asset quantity, string memo);
+         /**
+          * On transfer notification, calls the deposit function which locks the `quantity` of tokens sent in the reserve and calls
+          * the `emitxfer` action inline so that can be used as the basis for a proof of locking for the `issue`/`cancel` action
+          * on the destination chain.
+          *
+          * @param from - the owner of the tokens to be sent to the destination chain
+          * @param to - this contract account
+          * @param quantity - the asset to be sent to the destination chain
+          * @param memo - the beneficiary account on the destination chain
+          */
+         [[eosio::on_notify("*::transfer")]] void deposit(name from, name to, asset quantity, string memo);
 
 
-         typedef eosio::multi_index< "reserves"_n, extaccount > reserves;
+         typedef eosio::multi_index< "reserves"_n, account > reserves;
       
          typedef eosio::multi_index< "processed"_n, processed,
             indexed_by<"digest"_n, const_mem_fun<processed, checksum256, &processed::by_digest>>> processedtable;
