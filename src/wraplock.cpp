@@ -38,35 +38,6 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
 
 }
 
-//locks a token amount in the reserve for an interchain transfer
-void token::lock(const name& owner,  const asset& quantity, const name& beneficiary){
-
-  check(global_config.exists(), "contract must be initialized first");
-
-  require_auth(owner);
-
-  check(quantity.amount > 0, "must lock positive quantity");
-
-  sub_external_balance( owner, quantity );
-  add_reserve( quantity );
-
-  auto global = global_config.get();
-
-  token::xfer x = {
-    .owner = owner,
-    .quantity = extended_asset(quantity, global.native_token_contract),
-    .beneficiary = beneficiary
-  };
-
-  action act(
-    permission_level{_self, "active"_n},
-    _self, "emitxfer"_n,
-    std::make_tuple(x)
-  );
-  act.send();
-
-}
-
 //emits an xfer receipt to serve as proof in interchain transfers
 void token::emitxfer(const token::xfer& xfer){
 
@@ -105,69 +76,13 @@ void token::add_reserve(const asset& value){
 
 }
 
-void token::sub_external_balance( const name& owner, const asset& value ){
-
-   extaccounts from_acnts( get_self(), owner.value );
-
-   const auto& from = from_acnts.get( value.symbol.code().raw(), "no balance object found" );
-   check( from.balance.amount >= value.amount, "overdrawn balance" );
-
-   from_acnts.modify( from, owner, [&]( auto& a ) {
-         a.balance -= value;
-      });
-}
-
-void token::add_external_balance( const name& owner, const asset& value, const name& ram_payer ){
-
-   extaccounts to_acnts( get_self(), owner.value );
-   auto to = to_acnts.find( value.symbol.code().raw() );
-   if( to == to_acnts.end() ) {
-      to_acnts.emplace( ram_payer, [&]( auto& a ){
-        a.balance = value;
-      });
-   } else {
-      if (value.amount > 0) { // prevent modification in repreated opens
-          to_acnts.modify( to, same_payer, [&]( auto& a ) {
-            a.balance += value;
-          });
-      }
-   }
-
-}
-
-void token::open( const name& owner, const symbol& symbol, const name& ram_payer )
-{
-   check(global_config.exists(), "contract must be initialized first");
-
-   require_auth( ram_payer );
-
-   check( is_account( owner ), "owner account does not exist" );
-
-   auto global = global_config.get();
-   add_external_balance(owner, asset{0, symbol}, ram_payer);
-
-}
-
-void token::close( const name& owner, const symbol& symbol )
-{
-   check(global_config.exists(), "contract must be initialized first");
-
-   require_auth( owner );
-
-   extaccounts acnts( get_self(), owner.value );
-   auto it = acnts.find( symbol.code().raw() );
-   check( it != acnts.end(), "Balance row already deleted or never existed. Action won't have any effect." );
-   check( it->balance.amount == 0, "Cannot close because the balance is not zero." );
-   acnts.erase( it );
-
-}
-
 void token::deposit(name from, name to, asset quantity, string memo)
 { 
 
     print("transfer ", name{from}, " ",  name{to}, " ", quantity, "\n");
     print("sender: ", get_sender(), "\n");
     
+    check(global_config.exists(), "contract must be initialized first");
     auto global = global_config.get();
     check(get_sender() == global.native_token_contract, "transfer not permitted from unauthorised token contract");
 
@@ -176,7 +91,27 @@ void token::deposit(name from, name to, asset quantity, string memo)
     else if (to == get_self() && from != get_self()){
       //ignore outbound transfers from this contract, as well as inbound transfers of tokens internal to this contract
       //otherwise, means it's a deposit of external token from user
-      add_external_balance(from, quantity, from);
+
+      // locks a token amount in the reserve for an interchain transfer
+
+      check(quantity.amount > 0, "must lock positive quantity");
+
+      add_reserve( quantity );
+
+      auto global = global_config.get();
+
+      token::xfer x = {
+        .owner = from,
+        .quantity = extended_asset(quantity, global.native_token_contract),
+        .beneficiary = name(memo)
+      };
+
+      action act(
+        permission_level{_self, "active"_n},
+        _self, "emitxfer"_n,
+        std::make_tuple(x)
+      );
+      act.send();
 
     }
 
@@ -246,21 +181,13 @@ void token::withdrawb(const name& prover, const bridge::lightproof blockproof, c
     _withdraw(prover, actionproof);
 }
 
-void token::clear(const name extaccount)
+void token::clear()
 { 
   require_auth( _self );
 
   check(global_config.exists(), "contract must be initialized first");
 
   // if (global_config.exists()) global_config.remove();
-
-  extaccounts e_table( get_self(), extaccount.value);
-
-  while (e_table.begin() != e_table.end()) {
-    auto itr = e_table.end();
-    itr--;
-    e_table.erase(itr);
-  }
 
   while (_reservestable.begin() != _reservestable.end()) {
     auto itr = _reservestable.end();
@@ -274,10 +201,6 @@ void token::clear(const name extaccount)
     _processedtable.erase(itr);
   }
 
-/*
-proofstable
-
-*/
 }
 
 } /// namespace eosio

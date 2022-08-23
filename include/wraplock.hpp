@@ -39,9 +39,6 @@ namespace eosio {
          };
 
 
-         void sub_external_balance( const name& owner, const asset& value );
-         void add_external_balance( const name& owner, const asset& value, const name& ram_payer );
-
          void sub_reserve(const asset& value );
          void add_reserve(const asset& value );
 
@@ -71,9 +68,6 @@ namespace eosio {
          void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_wraptoken_contract);
 
 
-         [[eosio::action]]
-         void lock(const name& owner, const asset& quantity, const name& beneficiary);
-
          void _withdraw(const name& prover, const bridge::actionproof actionproof);
 
          [[eosio::action]]
@@ -84,23 +78,15 @@ namespace eosio {
       
 
          [[eosio::action]]
-         void open( const name& owner, const symbol& symbol, const name& ram_payer );
-
-
-         [[eosio::action]]
-         void close( const name& owner, const symbol& symbol );
-
-         [[eosio::action]]
          void emitxfer(const token::xfer& xfer);
 
 
          [[eosio::action]]
-         void clear(const name extaccount);
+         void clear();
 
         [[eosio::on_notify("*::transfer")]] void deposit(name from, name to, asset quantity, string memo);
 
 
-         typedef eosio::multi_index< "extaccounts"_n, extaccount > extaccounts;
          typedef eosio::multi_index< "reserves"_n, extaccount > reserves;
       
          typedef eosio::multi_index< "processed"_n, processed,
