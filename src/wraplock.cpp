@@ -4,7 +4,7 @@ namespace eosio {
 
 
 //adds a proof to the list of processed proofs (throws an exception if proof already exists)
-void token::add_or_assert(const bridge::actionproof& actionproof, const name& payer){
+void wraplock::add_or_assert(const bridge::actionproof& actionproof, const name& payer){
 
     auto pid_index = _processedtable.get_index<"digest"_n>();
 
@@ -24,7 +24,7 @@ void token::add_or_assert(const bridge::actionproof& actionproof, const name& pa
 
 }
 
-void token::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_wraptoken_contract)
+void wraplock::init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_wraptoken_contract)
 {
     require_auth( _self );
 
@@ -39,7 +39,7 @@ void token::init(const checksum256& chain_id, const name& bridge_contract, const
 }
 
 //emits an xfer receipt to serve as proof in interchain transfers
-void token::emitxfer(const token::xfer& xfer){
+void wraplock::emitxfer(const wraplock::xfer& xfer){
 
  check(global_config.exists(), "contract must be initialized first");
  
@@ -47,7 +47,7 @@ void token::emitxfer(const token::xfer& xfer){
 
 }
 
-void token::sub_reserve( const asset& value ){
+void wraplock::sub_reserve( const asset& value ){
 
    const auto& res = _reservestable.get( value.symbol.code().raw(), "no balance object found" );
    check( res.balance.amount >= value.amount, "overdrawn balance" );
@@ -57,7 +57,7 @@ void token::sub_reserve( const asset& value ){
       });
 }
 
-void token::add_reserve(const asset& value){
+void wraplock::add_reserve(const asset& value){
 
    auto res = _reservestable.find( value.symbol.code().raw() );
    if( res == _reservestable.end() ) {
@@ -73,7 +73,7 @@ void token::add_reserve(const asset& value){
 }
 
 // called on transfer action to lock tokens and initiate interchain transfer
-void token::deposit(name from, name to, asset quantity, string memo)
+void wraplock::deposit(name from, name to, asset quantity, string memo)
 { 
 
     print("transfer ", name{from}, " ",  name{to}, " ", quantity, "\n");
@@ -95,7 +95,7 @@ void token::deposit(name from, name to, asset quantity, string memo)
 
       auto global = global_config.get();
 
-      token::xfer x = {
+      wraplock::xfer x = {
         .owner = from,
         .quantity = extended_asset(quantity, global.native_token_contract),
         .beneficiary = name(memo)
@@ -112,10 +112,10 @@ void token::deposit(name from, name to, asset quantity, string memo)
 
 }
 
-void token::_withdraw(const name& prover, const bridge::actionproof actionproof){
+void wraplock::_withdraw(const name& prover, const bridge::actionproof actionproof){
     auto global = global_config.get();
 
-    token::xfer redeem_act = unpack<token::xfer>(actionproof.action.data);
+    wraplock::xfer redeem_act = unpack<wraplock::xfer>(actionproof.action.data);
 
     check(actionproof.action.account == global.paired_wraptoken_contract, "proof account does not match paired account");
 
@@ -135,7 +135,7 @@ void token::_withdraw(const name& prover, const bridge::actionproof actionproof)
 }
 
 // withdraw tokens (requires a heavy proof of retiring)
-void token::withdrawa(const name& prover, const bridge::heavyproof blockproof, const bridge::actionproof actionproof){
+void wraplock::withdrawa(const name& prover, const bridge::heavyproof blockproof, const bridge::actionproof actionproof){
     require_auth(prover);
 
     check(global_config.exists(), "contract must be initialized first");
@@ -156,7 +156,7 @@ void token::withdrawa(const name& prover, const bridge::heavyproof blockproof, c
 }
 
 // withdraw tokens (requires a light proof of retiring)
-void token::withdrawb(const name& prover, const bridge::lightproof blockproof, const bridge::actionproof actionproof){
+void wraplock::withdrawb(const name& prover, const bridge::lightproof blockproof, const bridge::actionproof actionproof){
     require_auth(prover);
 
     check(global_config.exists(), "contract must be initialized first");
@@ -176,7 +176,7 @@ void token::withdrawb(const name& prover, const bridge::lightproof blockproof, c
     _withdraw(prover, actionproof);
 }
 
-void token::clear()
+void wraplock::clear()
 { 
   require_auth( _self );
 
