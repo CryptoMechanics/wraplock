@@ -83,13 +83,13 @@ void wraplock::deposit(name from, name to, asset quantity, string memo)
     auto global = global_config.get();
     check(get_sender() == global.native_token_contract, "transfer not permitted from unauthorised token contract");
 
-    check(memo.size() > 0, "memo must contain valid account name");
-
     //if incoming transfer
     if (from == "eosio.stake"_n) return ; //ignore unstaking transfers
     else if (to == get_self() && from != get_self()){
       //ignore outbound transfers from this contract, as well as inbound transfers of tokens internal to this contract
       //otherwise, locks the tokens in the reserve and calls emitxfer to be used for issue/cancel proof
+
+      check(memo.size() > 0, "memo must contain valid account name");
 
       check(quantity.amount > 0, "must lock positive quantity");
 
