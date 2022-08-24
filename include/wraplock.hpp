@@ -60,7 +60,7 @@ namespace eosio {
       public:
          using contract::contract;
 
-         // structure used for the `emitxfer` action used in proof on destination chain
+         // structure used for the `emitxfer` action used in proof on wrapped token chain
          struct [[eosio::table]] xfer {
            name             owner;
            extended_asset   quantity;
@@ -73,8 +73,8 @@ namespace eosio {
           * @param chain_id - the id of the chain running this contract
           * @param bridge_contract - the bridge contract on this chain
           * @param native_token_contract - the token contract on this chain being enabled for interchain transfers
-          * @param paired_chain_id - the id of the destination chain hosting the wrapped tokens
-          * @param paired_wraptoken_contract - the wraptoken contract on the the destination chain
+          * @param paired_chain_id - the id of the chain hosting the wrapped tokens
+          * @param paired_wraptoken_contract - the wraptoken contract on the wrapped token chain
           */
          [[eosio::action]]
          void init(const checksum256& chain_id, const name& bridge_contract, const name& native_token_contract, const checksum256& paired_chain_id, const name& paired_wraptoken_contract);
@@ -100,7 +100,7 @@ namespace eosio {
          void withdrawb(const name& prover, const bridge::lightproof blockproof, const bridge::actionproof actionproof);
       
          /**
-          * The inline action created by this contract when tokens are locked. Proof of this action is used on the destination chain.
+          * The inline action created by this contract when tokens are locked. Proof of this action is used on the wrapped token chain.
           */
          [[eosio::action]]
          void emitxfer(const wraplock::xfer& xfer);
@@ -113,13 +113,13 @@ namespace eosio {
 
          /**
           * On transfer notification, calls the deposit function which locks the `quantity` of tokens sent in the reserve and calls
-          * the `emitxfer` action inline so that can be used as the basis for a proof of locking for the `issue`/`cancel` action
-          * on the destination chain.
+          * the `emitxfer` action inline so that can be used as the basis for a proof of locking for the issue/cancel actions
+          * on the wrapped token chain.
           *
-          * @param from - the owner of the tokens to be sent to the destination chain
+          * @param from - the owner of the tokens to be sent to the wrapped token chain
           * @param to - this contract account
-          * @param quantity - the asset to be sent to the destination chain
-          * @param memo - the beneficiary account on the destination chain
+          * @param quantity - the asset to be sent to the wrapped token chain
+          * @param memo - the beneficiary account on the wrapped token chain
           */
          [[eosio::on_notify("*::transfer")]] void deposit(name from, name to, asset quantity, string memo);
 
